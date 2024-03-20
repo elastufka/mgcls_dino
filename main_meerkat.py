@@ -20,7 +20,6 @@ import time
 import math
 import json
 from pathlib import Path
-import pandas as pd
 
 import numpy as np
 from PIL import Image
@@ -29,16 +28,15 @@ import torch.nn as nn
 import torch.distributed as dist
 import torch.backends.cudnn as cudnn
 import torch.nn.functional as F
-from torchvision import datasets, transforms
+from torchvision import transforms
 from torchvision import models as torchvision_models
 
 import utils
 import vision_transformer as vits
 from vision_transformer import DINOHead
-from MeerKATDataset import MGCLSDataset, ReturnIndexDataset
+from MeerKATDataset import MGCLSDataset
 from transforms import *
 import wandb
-import copy
 
 def get_args_parser():
     parser = argparse.ArgumentParser('DINO', add_help=False)
@@ -123,7 +121,7 @@ def get_args_parser():
         help='Please specify path to the training data.')
     parser.add_argument('--project', default = 'MGCLS_DINO', type = str, help='Name of wandb project to log to.')
     parser.add_argument('--output_dir', default=".", type=str, help='Path to save logs and checkpoints.')
-   parser.add_argument("--augmentations", default=("standard"), type=str, nargs='+', help='Augmentations to apply to training data')
+    parser.add_argument("--augmentations", default=("standard"), type=str, nargs='+', help='Augmentations to apply to training data')
     parser.add_argument('--in_chans', default = 1, type = int, help = 'Number of channels in input images.')
     parser.add_argument('--saveckp_freq', default=20, type=int, help='Save checkpoint every x epochs.')
     parser.add_argument('--seed', default=0, type=int, help='Random seed.')
@@ -149,7 +147,7 @@ def train_dino(args):
     autocontrast = True if "autocontrast" in args.augmentations else False
     rotate = 30 if "rotate" in args.augmentations else False
 
-    transform = DINO_standard_augs(
+    transform = DINO_extra_augs(
         args.global_crops_scale,
         args.local_crops_scale,
         args.local_crops_number,
@@ -448,9 +446,16 @@ class DINOLoss(nn.Module):
         self.center = self.center * self.center_momentum + batch_center * (1 - self.center_momentum)
 
 
-class DINO_standard_augs(object):
+class DINO_extra_augs(object):
     def __init__(self, global_crops_scale, local_crops_scale, local_crops_number, scale= None, fake_3chan = True, hflip = False, vflip = False, rotate = None, blur = True, autocontrast = False, powerlaw = False, restrict_to_center=False):
-        """DataAugmentationDINO with standard torchvision transform options."""
+        """based on the original DataAugmentationDINO with standard torchvision transform options.
+        New options are:
+        - scaling via contrast stretch transform
+        - random horizontal and vertical flip
+        - random rotation
+        - duplicate single channel to n channels if required to match input shape
+        - random autocontrast
+        - randomly applied powerlaw scaling, either with fixed power or random power"""
         glist, llist = [], []
         if scale:
             glist.append(ContrastStretchTransform(plow=10, phigh=99))
