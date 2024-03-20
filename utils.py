@@ -68,27 +68,12 @@ class Solarization(object):
         else:
             return img
 
-
-def load_pretrained_weights(model, pretrained_weights, checkpoint_key, model_name, patch_size, strict=True):
-    #if os.path.isfile(pretrained_weights):
-    if isinstance(pretrained_weights, str) and os.path.isfile(pretrained_weights):
+def load_pretrained_weights(model, pretrained_weights, checkpoint_key, model_name, patch_size):
+    if os.path.isfile(pretrained_weights):
         state_dict = torch.load(pretrained_weights, map_location="cpu")
-        #print(state_dict.keys())
         if checkpoint_key is not None and checkpoint_key in state_dict:
             print(f"Take key {checkpoint_key} in provided checkpoint dict")
             state_dict = state_dict[checkpoint_key]
-            # remove `module.` prefix
-            state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
-            # remove `backbone.` prefix induced by multicrop wrapper
-            state_dict = {k.replace("backbone.", ""): v for k, v in state_dict.items()}
-            msg = model.load_state_dict(state_dict, strict=False)
-            print('Pretrained weights found at {} and loaded with msg: {}'.format(pretrained_weights, msg))
-        else:
-            msg = model.load_state_dict(state_dict, strict=False)
-            print('Pretrained weights found at {} and loaded with msg: {}'.format(pretrained_weights, msg))
-            
-    elif isinstance(pretrained_weights, collections.OrderedDict): #pretrained_weights is the state_dict already
-        state_dict = pretrained_weights
         # remove `module.` prefix
         state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
         # remove `backbone.` prefix induced by multicrop wrapper
@@ -119,36 +104,12 @@ def load_pretrained_weights(model, pretrained_weights, checkpoint_key, model_nam
         if url is not None:
             print("Since no pretrained weights have been provided, we load the reference pretrained DINO weights.")
             state_dict = torch.hub.load_state_dict_from_url(url="https://dl.fbaipublicfiles.com/dino/" + url)
-            model.load_state_dict(state_dict, strict=strict)
+            model.load_state_dict(state_dict, strict=True)
         else:
-            print("Please use the `--pretrained_weights` argument to indicate the path of the checkpoint to evaluate.")
-            url = None
-            if model_name == "vit_small" and patch_size == 16:
-                url = "dino_deitsmall16_pretrain/dino_deitsmall16_pretrain.pth"
-            elif model_name == "vit_small" and patch_size == 8:
-                url = "dino_deitsmall8_pretrain/dino_deitsmall8_pretrain.pth"
-            elif model_name == "vit_base" and patch_size == 16:
-                url = "dino_vitbase16_pretrain/dino_vitbase16_pretrain.pth"
-            elif model_name == "vit_base" and patch_size == 8:
-                url = "dino_vitbase8_pretrain/dino_vitbase8_pretrain.pth"
-            elif model_name == "xcit_small_12_p16":
-                url = "dino_xcit_small_12_p16_pretrain/dino_xcit_small_12_p16_pretrain.pth"
-            elif model_name == "xcit_small_12_p8":
-                url = "dino_xcit_small_12_p8_pretrain/dino_xcit_small_12_p8_pretrain.pth"
-            elif model_name == "xcit_medium_24_p16":
-                url = "dino_xcit_medium_24_p16_pretrain/dino_xcit_medium_24_p16_pretrain.pth"
-            elif model_name == "xcit_medium_24_p8":
-                url = "dino_xcit_medium_24_p8_pretrain/dino_xcit_medium_24_p8_pretrain.pth"
-            elif model_name == "resnet50":
-                url = "dino_resnet50_pretrain/dino_resnet50_pretrain.pth"
-            if url is not None:
-                print("Since no pretrained weights have been provided, we load the reference pretrained DINO weights.")
-                state_dict = torch.hub.load_state_dict_from_url(url="https://dl.fbaipublicfiles.com/dino/" + url)
-                model.load_state_dict(state_dict, strict=strict)
-            else:
-                print("There is no reference weights available for this model => We use random weights.")
+            print("There is no reference weights available for this model => We use random weights.")
 
-def load_pretrained_linear_weights(linear_classifier, model_name, patch_size, strict=True):
+
+def load_pretrained_linear_weights(linear_classifier, model_name, patch_size):
     url = None
     if model_name == "vit_small" and patch_size == 16:
         url = "dino_deitsmall16_pretrain/dino_deitsmall16_linearweights.pth"
@@ -163,7 +124,7 @@ def load_pretrained_linear_weights(linear_classifier, model_name, patch_size, st
     if url is not None:
         print("We load the reference pretrained linear weights.")
         state_dict = torch.hub.load_state_dict_from_url(url="https://dl.fbaipublicfiles.com/dino/" + url)["state_dict"]
-        linear_classifier.load_state_dict(state_dict, strict=strict)
+        linear_classifier.load_state_dict(state_dict, strict=True)
     else:
         print("We use random linear weights.")
 
@@ -695,19 +656,6 @@ def get_params_groups(model):
     regularized = []
     not_regularized = []
     for name, param in model.named_parameters():
-        #print(name, param.shape, param.requires_grad)
-#         if len(param.shape) == 4 and in_chans == 1: #and param.shape[1] != 1 
-#             pshape = param.shape
-#             print(f"reshaping parameter {name} requires_grad={param.requires_grad} from shape {pshape} to ({pshape[0],1,pshape[2],pshape[3]})")
-#             param_detach = param.clone().detach()
-#             param1d = param_detach[:,0,:,:].reshape((pshape[0],1,pshape[2],pshape[3]))
-#             param[:] = param1d
-#             param = param.requires_grad_(True)
-#             print(f"is leaf: {param.is_leaf}, {param.shape}")
-            
-#             #translation = base[0].vertices.clone().detach()
-#             #translation[:] = 10.0
-#             #translation = translation.requires_grad_(True)
         if not param.requires_grad:
             continue
         # we do not regularize biases nor Norm parameters
