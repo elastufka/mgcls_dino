@@ -14,7 +14,6 @@
 import argparse
 import os
 import sys
-#sys.path.append("/home/users/l/lastufka/feuerzeug")
 import datetime
 import time
 import math
@@ -193,7 +192,7 @@ def train_dino(args):
         student = torchvision_models.__dict__[args.arch]()
         teacher = torchvision_models.__dict__[args.arch]()
         embed_dim = student.fc.weight.shape[1]
-        if args.in_chans == 1:
+        if args.in_chans == 1: #replace the input layer with single channel instead of 3
             student.conv1 = nn.Conv2d(1, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
             teacher.conv1 = nn.Conv2d(1, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
     else:

@@ -1,26 +1,21 @@
 import os
+import glob
+import numpy as np
 from transforms import *
-from NumPyDataset import NumpyFolderDataset, PairedDataset
 import pandas as pd
 
 class MeerKATDataset(NumpyFolderDataset):
-    def __init__(self, data, indices = None, labels=None, transform=None, loader=None, fake_3chan = True, metadata = None, scaling = 'contrast'):
-        super().__init__(data, indices = indices, transform=transform, loader = loader, fake_3chan = fake_3chan)
+    def __init__(self, data, indices=None, labels=None, transform=None, loader=None, metadata=None):
+        super().__init__(data, indices=indices, labels=labels, transform=transform, loader=loader, metadata=metadata)
         #self.transform = transform
         self.labels_from = labels
-        self.source_images = self.get_source_imagenames()
         if metadata is not None:
             self.metadata = pd.read_csv(metadata)
-        #self.scaling = scaling #do this for now instead of passing Transform so that kwargs can be changed
         
     def __getitem__(self, index):
         file = self.data[index]
         x = self.loader(file)
-        #if self.scaling is not None: #in case want to test without scaling for some reason... or it's already scaled
-        #    if self.scaling == "contrast":
-        #        p2,p98 = self.contrast_stretch_values(index) #try/except 
-        #        cs = ContrastStretchTransform(plow=p2, phigh=p98)
-        #        x = cs(x)
+
         if self.transform:
             x = self.transform(x) # Image.fromarray(x)) 
         if self.labels_from:
@@ -37,29 +32,6 @@ class MeerKATDataset(NumpyFolderDataset):
         except Exception as e:
             print(filename, labels)
         return label
-
-    def contrast_stretch_values(self, index):
-        '''get p2 and p98 values from metadata which correspond to FITS file of (crop) origin'''
-        file = self.data[index]
-        root_filename = file[file.rfind("/")+1:file.rfind('_crop')]
-        meta = self.metadata.where(self.metadata.file_prefix == root_filename).dropna(how='all').reset_index()
-        #try/except in case it's not there
-        #do this later
-        p2 = meta["p2"][0]
-        p98 = meta["p98"][0]
-        return p2,p98
-    
-    def get_source_imagenames(self):
-        imagenames = []
-        for filename in self.data:
-            path = os.path.normpath(filename)
-            imname = path.split(os.sep)[-1]
-            #extension = imname[imname.rfind('.'):]
-            imname = imname[:imname.rfind(".")]
-            if "crop" in imname:
-                imname = imname[:imname.find("_crop")] 
-            imagenames.append(f"{imname}.fits")
-        return imagenames
 
 class MIGHTEEDataset(MeerKATDataset):
     def __init__(self, data, labels="source", transform=None, loader=None, fake_3chan = True, scaling = 'contrast'):
