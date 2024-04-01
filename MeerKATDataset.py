@@ -3,6 +3,58 @@ import glob
 import numpy as np
 from transforms import *
 import pandas as pd
+import torch
+from PIL import Image
+from torchvision import transforms
+from torchvision.datasets import DatasetFolder
+
+def npy_loader(path):
+    sample = np.load(path).astype(np.float32)
+    return sample
+
+class RegressionDataset(torch.utils.data.Dataset):
+    def __init__(self, X, y):
+        super().__init__()
+        self.X = torch.from_numpy(X.astype('float32'))
+        self.y = torch.from_numpy(y.astype('float32'))
+
+    def __len__(self):
+        return len(self.X)
+    
+    def __getitem__(self, index):
+        return self.X[index], self.y[index].unsqueeze(0)
+
+class NumpyFolderDataset(DatasetFolder):
+    def __init__(self, data_path, indices = None, transform=None, loader = None, fake_3chan = False):
+        #super().__init__(data_path, transform=transform, loader = loader)
+        if not loader:
+            self.loader = npy_loader
+        else:
+            self.loader = loader 
+        if fake_3chan:
+            tlist = [transforms.ToTensor()]
+            tlist.append(FakeChannels())
+            if transform:
+                tlist.extend(transform)
+            transform = transforms.Compose(tlist)
+        self.transform = transform 
+        self.data = sorted(glob.glob(os.path.join(data_path,"*.npy")))
+        if indices is not None:
+            self.data = self.data[indices]
+        
+    def get_filename(self,index):
+        return self.data[index]
+
+    def __getitem__(self, index):
+        file = self.data[index]
+        x = self.loader(file)
+
+        if self.transform:
+            x = self.transform(x) #Image.fromarray(x))  
+        return x 
+    
+    def __len__(self):
+        return len(self.data)
 
 class MeerKATDataset(NumpyFolderDataset):
     def __init__(self, data, indices=None, labels=None, transform=None, loader=None, metadata=None):
@@ -44,36 +96,6 @@ class MGCLSDataset(MeerKATDataset):
     def __init__(self, data, indices = None, labels=None, transform=None, loader=None, fake_3chan = True, metadata = None, scaling = 'contrast'):
         super().__init__(data, indices=indices, labels=labels, transform=transform, loader = loader, fake_3chan = fake_3chan, metadata = metadata, scaling = scaling)
         self.data_product = "basic" if "basic" in data else "enhanced"
-        
-class MGCLSPairedDataset(PairedDataset):
-    def __init__(self, data_path0, data_path1, transform0=None, transform1=None, loader=None):
-        super().__init__(data_path0, data_path1, transform0=transform0, transform1=transform1, loader = loader)
-  
-    def __getitem__(self, index):
-        '''Assume DINO transforms, so combine global/local crops before output'''
-        file0, file1 = self.data[index]
-        x0 = self.loader(file0)
-        x1 = self.loader(file1)
-
-        if self.transform0:
-            x0 = self.transform0(Image.fromarray(x0))
-        if self.transform1:
-            x1 = self.transform1(Image.fromarray(x1))  
-            
-        # global crops together
-        g0 = x0['global']
-        g1 = x1['global'][0] #only take the first global crop of the enhanced image. it will go to the student network
-        g0.extend(g1)
-        #np.random.shuffle(g0)
-        # local crops together
-        l0 = x0['local']
-        l1 = x1['local']
-        l0.extend(l1)
-        np.random.shuffle(l0)
-        #put them all in one list
-        g0.extend(l0)
-
-        return g0
 
 class ReturnIndexDataset(MGCLSDataset):
     def __getitem__(self, idx):
