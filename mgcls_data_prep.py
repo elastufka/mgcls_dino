@@ -1,29 +1,34 @@
 import numpy as np
 from astropy.io import fits
-#from astropy.visualization import astropy_mpl_style
 from astropy.wcs import WCS
-from astropy.coordinates import SkyCoord as sc
+#from astropy.coordinates import SkyCoord as sc
 from astropy.nddata import Cutout2D
 from astropy import units as u
-from astropy.time import Time
 from matplotlib import pyplot as plt
-from plotly import graph_objects as go
-from skimage.transform import resize
 import os
 import pandas as pd
 import glob
 import warnings
-from astropy.io import fits
-from astropy.table import Table
-from feuerzeug.datasets.NumPyDataset import NumpyFolderDataset
-from feuerzeug.transforms import FakeChannels
-from feuerzeug.utils import npy_loader
-from torchvision import transforms
-from PIL import Image
 from skimage.exposure import rescale_intensity
 import json
 
 def mapdata_from_fits(fitsfile, return_wcs = True, return_header = False):
+    """
+    Extract map data from a FITS file.
+
+    This function reads a FITS file and extracts the map data along with optional WCS and header information.
+
+    Parameters:
+    fitsfile (str): The path to the FITS file.
+    return_wcs (bool): If True, return the WCS information along with the map data. Defaults to True.
+    return_header (bool): If True, return the FITS header along with the map data. Defaults to False.
+
+    Returns:
+    tuple or numpy.ndarray: Depending on the input parameters, returns either:
+                            - (WCS, numpy.ndarray): If return_wcs is True.
+                            - (FITS header, numpy.ndarray): If return_header is True.
+                            - (WCS, FITS header, numpy.ndarray): If both return_wcs and return_header are True.
+                            - numpy.ndarray: If neither return_wcs nor return_header is True."""
     with fits.open(fitsfile) as f:
         #print(f.info())
         header = f[0].header
@@ -40,6 +45,22 @@ def mapdata_from_fits(fitsfile, return_wcs = True, return_header = False):
         return dat
 
 def file_writer(array, name = None, ext='.fits', header = None):
+    """
+    Write an array to a file with the specified format.
+
+    This function writes the given array to a file with the specified name and format.
+    It supports writing to FITS (.fits) and NumPy (.npy) formats.
+
+    Parameters:
+    array (numpy.ndarray): The array to be written to the file.
+    name (str): The name of the output file. If None, a default name will be used. Defaults to None.
+    ext (str): The file extension indicating the format ('.fits' for FITS, '.npy' for NumPy). Defaults to '.fits'.
+    header (astropy.io.fits.Header or None): The FITS header to be included if writing to a FITS file. 
+                                              Ignored if writing to a NumPy file. Defaults to None.
+
+    Returns:
+    None
+    """
     if not ext: 
         ext = name[name.rfind("."):]
     if ext == '.fits' and header:
@@ -106,6 +127,18 @@ def file_writer(array, name = None, ext='.fits', header = None):
 #             file_writer(d, name = f"{enhanced[:-5]}_{cfreqs[i]}MHz", ext = ext, header = header)
 
 def MGCLS_find_file(source, ftype = "5pln", enhanced = False):
+    """This function searches for an MGCLS file associated with the provided source name. The file can be either in 
+    the 'basic' or 'enhanced' subdirectory depending on the value of the 'enhanced' parameter.
+
+    Parameters:
+    source (str): The name of the MGCLS source.
+    ftype (str): The file type to search for. Defaults to "5pln".
+    enhanced (bool): If True, search for the file in the 'enhanced' subdirectory. 
+                     If False, search in the 'basic' subdirectory. Defaults to False.
+
+    Returns:
+    str or False: The path to the found MGCLS file if found, or False if the file is not found.
+    """
     subdir = "enhanced" if enhanced else "basic"
     globstr = f"{subdir}/FITS/{source.strip().replace(' ','*')}"
     if enhanced:
@@ -131,6 +164,13 @@ def MGCLS_format_source_name(source):
     return source
 
 def get_MGCLS_targets():
+    """This function reads a CSV file named 'Table1_MGCLS_targets.csv', extracts the 'ClusterName' column,
+    and filters out any entries containing 'Bullet'. The resulting list contains the names of MGCLS targets.
+
+    Returns:
+    list or None: A list of MGCLS targets if the CSV file is found and processed successfully.
+                  Returns None if the CSV file is not found.
+    """
     try:
         sources = pd.read_csv("Table1_MGCLS_targets.csv")["ClusterName "]
         bullet = sources.str.contains("Bullet") #Bullet gets designation J0658.8-5556
@@ -141,7 +181,23 @@ def get_MGCLS_targets():
 
 def MGCLS4ML(parent_dir = '.', ftype = "5pln", crop_shape = (256,256), sname = None, stridex = None, stridey = None, overwrite = False, writenpy = False, output_dir = None):
     """Prepare MGCLS FITS images for ML
-    
+
+    Parameters:
+    parent_dir (str): The parent directory containing 'basic' and 'enhanced' subdirectories. Defaults to current directory.
+    ftype (str): The file type to search for. Defaults to "5pln".
+    crop_shape (tuple): The shape (height, width) of the cropped images. Defaults to (256, 256).
+    stridex (int): The stride along the x-axis for cropping. Defaults to None.
+    stridey (int): The stride along the y-axis for cropping. Defaults to None.
+    overwrite (bool): If True, overwrite existing cropped images. Defaults to False.
+    log (bool): If True, enable logging to a file named 'MGCLS4ML_log.txt' in `parent_dir`. Defaults to True.
+    crop_dir (str): The directory to save cropped images. Defaults to None, which saves in the current directory.
+
+    Raises:
+    AssertionError: If 'basic' or 'enhanced' subdirectories are missing in `parent_dir`.
+    IndexError: If basic or enhanced files are missing for any source.
+
+    Returns:
+    None
     """
     sources = get_MGCLS_targets() #get source list - can get it from the web if not in dir
     os.chdir(parent_dir)
@@ -179,7 +235,7 @@ def MGCLS4ML(parent_dir = '.', ftype = "5pln", crop_shape = (256,256), sname = N
             if output_dir is None:
                 output_dir = parent_dir 
             for i,c in enumerate(crops):
-                np.save(f"{os.path.join(out_dir, enhanced[:-5])}_crop_{i}.npy",c)
+                np.save(f"{os.path.join(output_dir, enhanced[:-5])}_crop_{i}.npy",c)
             #file_writer(crops, f"{os.path.join(output_dir,enhanced[:-5])}_crops", ext='.npy')
             file_writer(coords, f"{os.path.join(output_dir,enhanced[:-5])}_coords", ext='.npy')
         #elif writefits: #write FITS files instead
@@ -199,7 +255,26 @@ def MGCLS4ML(parent_dir = '.', ftype = "5pln", crop_shape = (256,256), sname = N
             return crops, coords
         
 def crops_and_coords(wcs, dat, crop_shape = (256,256), stridex = None, stridey = None, reject_nan = True, percent_nan = .4, header_stats = None):
-    """Get coordinates for top-left and bottom-right of crops from MGCLS enhanced image product"""
+    """
+    Get coordinates for top-left and bottom-right of crops from MGCLS enhanced image product.
+
+    This function extracts crops from the MGCLS enhanced image product and calculates the coordinates of the top-left and bottom-right corners of each crop.
+
+    Parameters:
+    wcs (astropy.wcs.WCS): The WCS (World Coordinate System) of the image.
+    dat (numpy.ndarray): The data array of the MGCLS image.
+    crop_shape (tuple): The shape (height, width) of the crop. Defaults to (256, 256).
+    stridex (int or None): The stride along the x-axis for cropping. Defaults to None.
+    stridey (int or None): The stride along the y-axis for cropping. Defaults to None.
+    reject_nan (bool): If True, reject crops containing NaN values. Defaults to True.
+    percent_nan (float): The threshold percentage of NaN values in a crop to reject it. Defaults to 0.4.
+    header_stats (dict or None): Statistics calculated from the header to be included in the FITS header of each crop. Defaults to None.
+
+    Returns:
+    tuple: A tuple containing two lists:
+           - A list of HDU objects, each containing a crop of the MGCLS image.
+           - A list of tuples, each containing the coordinates of the top-left and bottom-right corners of a crop.
+    """    
     if dat.ndim == 2:
         imshape = dat.shape
     elif len(dat) > 1: #5pln cubes
@@ -274,6 +349,24 @@ def crops_and_coords(wcs, dat, crop_shape = (256,256), stridex = None, stridey =
     return crops, coords
 
 def bltr_coords(wcs, x,y,crop_shape):
+    """
+    Get celestial coordinates for the bottom-left and top-right corners of a crop.
+
+    This function calculates the celestial coordinates (Right Ascension and Declination) 
+    corresponding to the bottom-left and top-right corners of a crop based on the provided WCS.
+
+    Parameters:
+    wcs (astropy.wcs.WCS or None): The WCS (World Coordinate System) transformation to use for coordinate conversion.
+                                    If None, returns pixel coordinates instead of celestial coordinates.
+    x (int): The x-coordinate of the bottom-left corner of the crop.
+    y (int): The y-coordinate of the bottom-left corner of the crop.
+    crop_shape (tuple): The shape (height, width) of the crop.
+
+    Returns:
+    list: A list containing two tuples:
+          - The celestial coordinates (RA, Dec) of the bottom-left corner.
+          - The celestial coordinates (RA, Dec) of the top-right corner.
+    """
     if not wcs:
         return [(x,y),(x+crop_shape[0],y+crop_shape[1])] #pixel coords
     else:
@@ -282,6 +375,20 @@ def bltr_coords(wcs, x,y,crop_shape):
         return [blc, trc]
     
 def calc_stride(dim, crop_dim, n):
+    """
+    Calculate the stride length for evenly dividing a dimension into 'n' crops.
+
+    This function calculates the stride length required to evenly divide a dimension into 'n' crops of size 'crop_dim'.
+    It adjusts the stride to ensure that the crops cover the entire dimension.
+
+    Parameters:
+    dim (int): The dimension to be divided.
+    crop_dim (int): The size of each crop dimension.
+    n (int): The number of crops to be generated.
+
+    Returns:
+    int: The calculated stride length.
+    """
     ideal = crop_dim*n
     rest = ideal - dim
     margin = rest//(n-1)
@@ -329,13 +436,13 @@ def calc_stride(dim, crop_dim, n):
 #             y += stridey
 #     return crops, coords
 
-def MIGHTEE_crops(arr, crop_shape = (256,256), stridex = None, stridey = None, reject_nan = True, percent_nan = .4):
-    """wrapper for MGCLS_crop_coords that does the cropping for MIGHTEE"""
-    if isinstance(arr, str):
-        arr = np.load(arr)
+# def MIGHTEE_crops(arr, crop_shape = (256,256), stridex = None, stridey = None, reject_nan = True, percent_nan = .4):
+#     """wrapper for MGCLS_crop_coords that does the cropping for MIGHTEE"""
+#     if isinstance(arr, str):
+#         arr = np.load(arr)
     
-    crops, coords = MGCLS_crop_coords(None, arr, crop_shape = crop_shape, stridex = stridex, stridey = stridey, reject_nan = reject_nan, percent_nan = percent_nan)
-    return crops, coords
+#     crops, coords = MGCLS_crop_coords(None, arr, crop_shape = crop_shape, stridex = stridex, stridey = stridey, reject_nan = reject_nan, percent_nan = percent_nan)
+#     return crops, coords
 
 # def check_crop_extent(bpix, crop_shape = (256,256)):
 #     """Check that extent of all potential crops is the same to within 1 pix"""
@@ -485,7 +592,23 @@ def MIGHTEE_crops(arr, crop_shape = (256,256), stridex = None, stridey = None, r
 
 
 def scale_crops(crop_dir, out_dir, meta, method="cs", **kwargs):
-    """scale crops according to entire image parameters."""
+    """
+    Scale crops according to entire image parameters.
+
+    This function scales the crops located in the 'crop_dir' directory according to the parameters extracted from the entire image.
+    It reads metadata from the CSV file specified in the 'meta' parameter.
+
+    Parameters:
+    crop_dir (str): The directory containing the crops to be scaled.
+    out_dir (str): The directory where scaled crops will be saved.
+    meta (str): The path to the CSV file containing metadata (dataframe with metadata).
+    method (str): The scaling method to be used. Defaults to "cs" (contrast_stretch).
+                  Other supported methods include "mt" (manual thresholding).
+    **kwargs: Additional keyword arguments to be passed to the scaling method.
+
+    Returns:
+    None
+    """
     meta = pd.read_csv(meta) #dataframe with metadata
     crops = sorted(glob.glob(f"{os.path.join(crop_dir, '*crop*')}"))
     cprev=''
@@ -527,13 +650,13 @@ def scale_crops(crop_dir, out_dir, meta, method="cs", **kwargs):
 
 #################### catalog functions #############
 
-def load_MIGHTEE_txt_catalogs():
-    cats = glob.glob("/home/glados/unix-Documents/AstroSignals/data/MIGHTEE/early_science/*.txt")
-    cdf = pd.read_fwf(cats[0], skiprows=8, header=[0,1])
-    cdf.drop(0,inplace=True)
-    xdf = pd.read_fwf(cats[1], skiprows=8, header=[0,1])
-    xdf.drop(0,inplace=True)
-    return cdf, xdf
+# def load_MIGHTEE_txt_catalogs():
+#     cats = glob.glob("/home/glados/unix-Documents/AstroSignals/data/MIGHTEE/early_science/*.txt")
+#     cdf = pd.read_fwf(cats[0], skiprows=8, header=[0,1])
+#     cdf.drop(0,inplace=True)
+#     xdf = pd.read_fwf(cats[1], skiprows=8, header=[0,1])
+#     xdf.drop(0,inplace=True)
+#     return cdf, xdf
 
 # def split_cat(coords, cat, index, source = "COSMOS"):
 #     bl = coords[index][0][0]
@@ -598,7 +721,17 @@ def load_MIGHTEE_txt_catalogs():
 #     return fig
 
 def MGCLS_fmt_cat4coco(filename):
-    """format MGCLS compact source catalog for pyBDSF_to_COCO"""
+    """Format MGCLS compact source catalog for pyBDSF_to_COCO.
+
+    This function reads a compact source catalog from the specified file and formats it to be compatible with the pyBDSF_to_COCO tool.
+    It converts angular measurements from arcseconds to degrees and renames columns to match the expected format.
+
+    Parameters:
+    filename (str): The path to the input compact source catalog file.
+
+    Returns:
+    None
+    """
     df = pd.read_csv(filename)
     df['smax_asec'] = [float(row.smax_asec)*u.arcsec.to(u.deg) for _, row in df.iterrows()] 
     df['smin_asec'] = [float(row.smin_asec)*u.arcsec.to(u.deg) for _, row in df.iterrows()]
@@ -608,8 +741,19 @@ def MGCLS_fmt_cat4coco(filename):
     df.to_csv(filename)
 
 def crop_catalog_aggs(cats):
-    """given list of COCO json files, calculate some catalog statistics to use as metadata
-    ex: number of sources in crop, avg flux, avg size, etc"""
+    """
+    Calculate catalog statistics for a list of COCO JSON files.
+
+    This function takes a list of COCO JSON files representing compact source catalogs and calculates various statistics
+    to be used as metadata. It includes the number of sources in each crop, average flux, average size, and more.
+
+    Parameters:
+    cats (list): A list of paths to COCO JSON files.
+
+    Returns:
+    pandas.DataFrame: A DataFrame containing catalog statistics aggregated from the input COCO JSON files.
+                      The DataFrame includes columns such as 'iscrowd', 'area', 'root_filename', and aggregated statistics.
+    """
     catlist = []
     for cat in cats:
         with open(cat) as f:
@@ -628,4 +772,4 @@ def crop_catalog_aggs(cats):
 
 if __name__ == '__main__':
     MGCLS4ML("/home/users/l/lastufka/scratch/MGCLS_data")
-    scale_crops(out_dir, f"{out_dir}_cs", meta)
+    #scale_crops(out_dir, f"{out_dir}_cs", meta)

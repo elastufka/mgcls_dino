@@ -46,13 +46,39 @@ class ZScaleTransform(object):
         return zscaled_np
     
 class ContrastStretchTransform(object):
-    """scale the image via contrast stretching"""
+    """
+    Scale the image via contrast stretching.
+
+    This class implements a transformation to scale images via contrast stretching. It adjusts the intensity range of the image 
+    to enhance contrast by stretching pixel values to cover the entire intensity range.
+
+    Parameters:
+    plow (float or None): The lower percentile value used as the lower bound for the intensity range.
+                          If None, the lower percentile will be calculated from the sample.
+    phigh (float or None): The upper percentile value used as the upper bound for the intensity range.
+                           If None, the upper percentile will be calculated from the sample.
+    center (int or None): The center of the image used for calculating the upper percentile.
+                          If None, the entire image will be used.
+                          Only applicable when phigh is not None.
+
+    Returns:
+    numpy.ndarray: The rescaled image array with values scaled to the range [0, 1].
+    """
     def __init__(self, plow= None, phigh = None, center = None):
         self.plow = plow
         self.phigh = phigh
         self.center = center
 
     def __call__(self, sample):
+        """
+        Apply contrast stretching transformation to the input sample.
+
+        Parameters:
+        sample (numpy.ndarray or torch.Tensor): The input image array.
+
+        Returns:
+        numpy.ndarray: The rescaled image array with values scaled to the range [0, 1].
+        """
         if isinstance(self.plow,int) and isinstance(self.phigh,int):
             self.plow = np.percentile(sample, self.plow)
             if self.center:
@@ -69,12 +95,31 @@ class ContrastStretchTransform(object):
         return rescaled_np
     
 class PowerlawTransform(object):
-    """scale the image via Mariia's method"""
+    """
+    This class implements a transformation to scale images using a power-law transformation.
+ 
+    Parameters:
+    C (float or None): The constant value used for normalization.
+                       If None, the maximum pixel value in the sample will be used.
+    power (float): The power parameter for the power-law transformation.
+
+    Returns:
+    numpy.ndarray: The transformed image array with values scaled to the range [-1, 1].
+    """
     def __init__(self, C, power):
         self.C = C
         self.power = power
 
     def __call__(self, sample):
+        """
+        Apply the power-law transformation to the input sample.
+
+        Parameters:
+        sample (numpy.ndarray): The input image array.
+
+        Returns:
+        numpy.ndarray: The transformed image array with values scaled to the range [-1, 1].
+        """
         sample -= np.nanmin(sample)
         if self.C is None:
             C = torch.max(sample)
@@ -85,7 +130,18 @@ class PowerlawTransform(object):
         return (I_norm - 0.5)/0.5
 
 class FakeChannels(object):
-    """Add n channels worth of the same data to the image array to match dimensions of pretrained networks"""
+    """
+    Add n channels worth of the same data to the image array to match dimensions of pretrained networks.
+
+    This class implements a transformation to add additional channels of the same data to an image array.
+    It is useful for matching the dimensions of pretrained networks that expect a certain number of input channels.
+
+    Parameters:
+    additional_channels (int): The number of total channels desired for the output image array. Defaults to 3.
+
+    Returns:
+    numpy.ndarray: The image array with additional channels of duplicate data added.
+    """
     def __init__(self, additional_channels =3):
         self.additional_channels = additional_channels
     def __call__(self, sample):
