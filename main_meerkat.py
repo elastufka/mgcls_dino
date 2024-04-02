@@ -37,6 +37,10 @@ from MeerKATDataset import MGCLSDataset
 from transforms import *
 import wandb
 
+torchvision_archs = [name for name in torchvision_models.__dict__
+    if name.islower() and not name.startswith("__")
+    and callable(torchvision_models.__dict__[name])]
+
 def get_args_parser():
     parser = argparse.ArgumentParser('DINO', add_help=False)
 
@@ -127,7 +131,7 @@ def get_args_parser():
     parser.add_argument('--num_workers', default=10, type=int, help='Number of data loading workers per GPU.')
     parser.add_argument("--dist_url", default="env://", type=str, help="""url used to set up
         distributed training; see https://pytorch.org/docs/stable/distributed.html""")
-    parser.add_argument("--local_rank", default=0, type=int, help="Please ignore and do not set this argument.")
+    #parser.add_argument("--local_rank", default=0, type=int, help="Please ignore and do not set this argument.")
     
     return parser
 
