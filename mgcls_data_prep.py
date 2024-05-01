@@ -372,7 +372,7 @@ def MGCLS_FITS_metadata(data_dir='.', ftype='5pln', plow=2, phigh=98):
     meta = pd.concat(headlist)
     meta.to_csv("MGCLS_FITS_metadata.csv")
 
-def scale_crops(crop_dir, out_dir, meta, method="cs", **kwargs):
+def scale_crops(crop_dir, out_dir, meta, method="cs", overwrite=False,**kwargs):
     """
     This function scales the crops located in the 'crop_dir' directory according to the parameters extracted from the entire image.
     It reads metadata from the CSV file specified in the 'meta' parameter.
@@ -398,6 +398,8 @@ def scale_crops(crop_dir, out_dir, meta, method="cs", **kwargs):
         ccurrent = c[c.rfind('/')+1:c.find("crop")-1]
         if ccurrent != cprev:
             pvals = meta.where(meta.file_prefix == ccurrent).dropna(how='all')[['P2','P98']].values
+        if os.path.exists(f"{os.path.join(out_dir,c[c.rfind('/')+1:])}"):
+            continue
         cdat = np.load(c) 
         if method == 'cs': #contrast_stretch
             cnew = rescale_intensity(cdat, in_range=tuple(pvals[0]),out_range=(0,1))
@@ -441,7 +443,7 @@ def crop_catalog_aggs(cats):
     Calculate catalog statistics for a list of COCO JSON files.
 
     This function takes a list of COCO JSON files representing compact source catalogs and calculates various statistics
-    to be used as metadata. It includes the number of sources in each crop, average flux, average size, and more.
+    to be used as metadata. It includes the number of sources in each crop, average flux, average size, and more. These can be used as labels for linear regression tasks.
 
     Parameters:
     cats (list): A list of paths to COCO JSON files.
@@ -468,13 +470,36 @@ def crop_catalog_aggs(cats):
 
     def merge_catalog_meta():
         pass
+    
+def labels_from_coco(coco_json):
+    with open(coco_json) as f:
+        ff = json.load(f)
+    anns = ff['annotations']
+    df = pd.DataFrame(anns)
+    idf = pd.DataFrame(ff['images'])
+    if not df.empty:
+        #groupby image/crop id, do some aggregations
+        gdf = df.groupby(df.image_id)[["iscrowd","area"]].agg(["count","sum","mean"])
+    else: 
+        print(f"No annotations found for {coco_json}!")
+    #flatten columns...
+    gdf.columns = gdf.columns.to_flat_index()
+    gdf.columns = [f"{c[0]}_{c[1]}" for c in gdf.columns]
+    #merge with image filenames
+    gdf.sort_index(inplace = True)
+    idf.sort_values(by='id', inplace = True)
+    cropdf = gdf.merge(idf, left_index = True, right_on = 'id')
+    cropdf.sort_values(by='file_name', inplace=True)
+    return cropdf
 
-def catalog_qc(coco_json,im_dir = ".", segmentations=False, **kwargs):
+def catalog_qc(coco_json,im_dir = ".", segmentations=False, verbose=False, page_limit = 100, **kwargs):
     """plot all crops and catalogs to check that they are ok"""
     with open(coco_json,'r') as f:
         jj = json.load(f)
     imdf = pd.DataFrame(jj['images'])
     anndf = pd.DataFrame(jj['annotations'])
+    if verbose:
+        print(f"{len(imdf)} images and {len(anndf)} annotations.")
     
     #get all images in current folder
     ims = glob.glob(os.path.join(im_dir,"*.npy"))
@@ -486,16 +511,16 @@ def catalog_qc(coco_json,im_dir = ".", segmentations=False, **kwargs):
     ims2 = [i[i.rfind('/')+1:] for i in ims]
 
     these_files = []
-    for f in imdf.file_name.values:
-        try:
-            these_files.append(ims[ims2.index(f)])
-        except ValueError:
-            continue
+    for i, row in imdf.iterrows():
+        if row.file_name in ims2:
+            these_files.append({"id":row.id, "file_name":row.file_name})
+    if verbose:
+        print(f"{len(these_files)} files found!")
         
     plt.style.use(astropy_mpl_style)
     with PdfPages(f"{coco_json[:coco_json.rfind('_')]}_qc.pdf") as pp:
         npages = 1
-        while len(these_files) >  0:
+        while len(these_files) >  0 and npages < page_limit:
             fig = plot_image_catalog_page(these_files[:30],anndf, segmentations=segmentations, **kwargs)
             pp.savefig(fig)
             plt.close()
@@ -507,9 +532,9 @@ def plot_image_catalog_page(images, annotations, bounding_boxes = True, segmenta
     n=6
     fig,ax = plt.subplots(n,5, figsize = (8.3,11.7))
     for i,image in enumerate(images):
-        dat = np.load(image)
-        crop_number = int(image[image.rfind("_")+1:image.rfind(".")])
-        jdf = annotations.where(annotations.image_id == crop_number).dropna()
+        dat = np.load(image['file_name'])
+        #crop_number = int(image[image.rfind("_")+1:image.rfind(".")])
+        jdf = annotations.where(annotations.image_id == image['id']).dropna()
 
         if bounding_boxes:
             bboxes = jdf.bbox
@@ -533,7 +558,7 @@ def plot_image_catalog_page(images, annotations, bounding_boxes = True, segmenta
                     segy = seg[1]
                 ax[i%n][i//n].plot(segx,segy,'m',linewidth=0.5)
         ax[i%n][i//n].axis('off')
-        ax[i%n][i//n].set_title(crop_number)
+        ax[i%n][i//n].set_title(image['id'])
     plt.tight_layout()
     return fig
 
@@ -545,16 +570,23 @@ if __name__ == '__main__':
     metafile = "/home/users/l/lastufka/scratch/MGCLS_data/enhanced/MGCLS_FITS_metadata.csv"
     #MGCLS4ML(datadir, output_dir=output_dir,  writenpy=True) #sname="Abell_13",
     #MGCLS_FITS_metadata() #generate metadata file from FITS headers if one does not yet exist
-    scale_crops(output_dir,  output_dir_cs, meta = metafile)
+    #scale_crops(output_dir,  output_dir_cs, meta = metafile)
     # try:
     #     #pyBDSF compact source catalogs to COCO format
     #     os.system(f"python ~/pyBDSF_to_COCO/pyBDSF_to_COCO.py --image {datadir}/enhanced/FITS/Abell_13_noFix_pol_I_Farcsec_5pln_cor.fits --catalog {datadir}/compact_catalogs/Abell-13_compact_source_catalog.csv --crop_coords {output_dir}/Abell_13_noFix_pol_I_Farcsec_5pln_cor_coords.npy --output_file {output_dir}/Abell_13_noFix_pol_I_Farcsec_5pln_cor_annotations.json --crop_prefix Abell_13_noFix_pol_I_Farcsec_5pln_cor_ --category_names source")
     # except Exception as e:
     #     print("No COCO annotations generated!")
     #     sys.exit(1)
-    # catalog_qc(f"{output_dir}/Abell_13_noFix_pol_I_Farcsec_5pln_cor_annotations.json",im_dir=output_dir_cs)
-    # cagg = crop_catalog_aggs([f"{output_dir}/Abell_13_noFix_pol_I_Farcsec_5pln_cor_annotations.json"])
-    # print(cagg.describe()) #see some overall statistics
+    #catalog_qc(f"{output_dir}/Abell_13_noFix_pol_I_Farcsec_5pln_cor_annotations.json",im_dir=output_dir_cs)
+    #cagg = crop_catalog_aggs([f"{output_dir}/Abell_13_noFix_pol_I_Farcsec_5pln_cor_annotations.json"])
+    #print(cagg.describe()) #see some overall statistics
     # add per-crop source counts, etc to metadata
-
-    #sname="Abell_13",El_Gordo file not found
+    #TBI
+    #once all COCO catalogs have been generated, combine:
+    from pyBDSF_to_COCO.utils import combine_coco, train_val_split
+    #combine_coco(output_dir, "mgcls_coco_annotations.json")
+    #if desired, do train-test split
+    os.mkdir(os.path.join(output_dir_cs, "train"))
+    os.mkdir(os.path.join(output_dir_cs, "test"))
+    os.chdir(output_dir_cs)
+    train_val_split(os.path.join(output_dir, "mgcls_coco_annotations.json"), "train", "test", test_size = 0.2, random_state=14)

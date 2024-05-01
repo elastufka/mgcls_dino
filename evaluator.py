@@ -5,7 +5,7 @@ import numpy as np
 import sys
 sys.path.append("/home/users/l/lastufka/solar_all_purpose")
 sys.path.append("/home/users/l/lastufka/astro_all_purpose")
-sys.path.append("/home/users/l/lastufka/mightee_dino")
+#sys.path.append("/home/users/l/lastufka/mightee_dino")
 
 from scipy.ndimage import gaussian_filter
 from sklearn.decomposition import PCA
@@ -13,14 +13,9 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 import pandas as pd
 import wandb
-#from feuerzeug.utils import DINO_log_to_df
-from models import *
-from NumPyDataset import RegressionDataset
+from evaluation_models import *
+from EvaluationDatasets import *
 from torcheval.metrics import MeanSquaredError, R2Score
-#from MeerKAT_utils import *
-#from ml_utils import ml_vis 
-#from ml_utils.ml_utils import fit_pca
-from eval_dino import label_mask, do_sim_search, build_faiss_idx
 import yaml
 import argparse
 import copy
@@ -80,16 +75,19 @@ def get_all_configs(config):
         #augmentations?
         
         for head, task in zip(headers, new_config['tasks'].keys()):
-            if task == "linear":
-                new_config['tasks'][task]['input'] = [f"{head}{arch}_{str_epochs}.pth"]
-            elif task in ["classify", "similarity"]:
-                try:
-                    testfile = new_config['tasks'][task]['input'][0]['test'] 
-                except KeyError:
-                    testfile = new_config['tasks'][task]['input']['test']
-                if testfile is not None:
-                    testfile = f"{testfile[:testfile.find(arch)]}{arch}_{str_epochs}.pth"
+#             if task == "linear":
+            
+#                 new_config['tasks'][task]['input'] = [f"{head}{arch}_{str_epochs}.pth"]
+            #elif task in ["classify", "similarity"]:
+            try:
+                testfile = new_config['tasks'][task]['input'][0]['test'] 
+            except KeyError:
+                testfile = new_config['tasks'][task]['input']['test']
+            if testfile is not None:
+                testfile = f"{testfile[:testfile.find(arch)]}{arch}_{str_epochs}.pth"
                 new_config['tasks'][task]['input'] = [{'train': f"{head}{arch}_{str_epochs}.pth", 'test': testfile}]
+            else:
+                new_config['tasks'][task]['input'] = [f"{head}{arch}_{str_epochs}.pth"]
         configs.append(new_config)
         #print(new_config)
         del new_config
@@ -114,6 +112,35 @@ def fit_pca(data, labels=None, n_components=15):
     siglabels = sum([1 for i,var in enumerate(pca.explained_variance_ratio_) if var > 0.01])
     #print(np.cumsum(pca.explained_variance_ratio_))
     return comp, labels, siglabels
+
+def label_mask(labels, sigma = 2):
+    labels = labels.reset_index()
+    if sigma is not None:
+        #mask extremes
+        minmask = labels.where(labels.iscrowd_count < (labels.iscrowd_count.mean() - sigma*labels.iscrowd_count.std()))
+        maxmask = labels.where(labels.iscrowd_count > (labels.iscrowd_count.mean() + sigma*labels.iscrowd_count.std()))
+    mask = np.isnan(minmask.iscrowd_count.values)
+    mask = mask * np.isnan(maxmask.iscrowd_count.values)
+    return mask
+
+def do_sim_search(feats, labels, index, idx_labels, k, top=1):
+    d = feats.shape[1]
+    intop = 0
+    for i, f in enumerate(feats):
+        lab = int(labels[i])
+        _, I = index.search(f.reshape((1,d)), k)
+        ilabs = idx_labels[I[0][:top]]
+        #print(lab, ilabs)
+        #if lab in ilabs:
+        intop += sum([1 if l == lab else 0 for l in ilabs])
+    return intop/(len(feats)*top)
+
+def build_faiss_idx(feats):
+    d = feats.shape[1]
+    index = faiss.IndexFlatL2(d) #IndexFlatIP(d) #
+    index.add(feats) #faiss.normalize_L2(mgcls_feats))
+    #index.is_trained
+    return index
 
 class Evaluator():
     def __init__(self, config, project, entity='elastufka', log_best = False):
@@ -198,52 +225,67 @@ class Evaluator():
         unseen = self.config['tags']['unseen']
         sigma = self.config['tags']['sigma']
         split = self.config['tasks']['linear']['split']
+        seed = self.config['tasks']['linear']['seed']
                 
         for ffile, lfile in zip(self.config['tasks']['linear']['input'], self.config['tasks']['linear']['labels']):
-            feats = torch.load(os.path.join(self.output_dir, ffile)).cpu()
-            if self.config['tags']['pca'] !=0:
-                feats, _, _ = fit_pca(feats, n_components = self.config['tags']['pca'])
-
-            labels = self._get_crop_labels(lfile)
-            y = labels[quant].values
-            nanidx = np.where(np.isnan(y))[0]
-            X_scaled = StandardScaler().fit_transform(feats)
-            X_scaled= np.delete(X_scaled,nanidx,axis=0)
-            y = np.delete(y,nanidx,axis=0)
-            meta = labels.drop(nanidx).reset_index(drop=True) 
+            if isinstance(ffile, dict): #train/test split already done
+                trainfile = ffile["train"]
+                testfile = ffile["test"]
+                train_dataset, test_dataset = self._get_FR_feats(trainfile, testfile, lfile, seed, None, task='linear', label_key='iscrowd_count')
+                #print(len(train_dataset), len(test_dataset))
+                val_dataset = test_dataset
                 
-            if dqf is not None:
-                X_scaled, y, meta = self._select_dqf(X_scaled, y, meta, dqf = dqf) #don't know how this combines with sigma
-        
-            if unseen:
-                meta = meta.where(meta.in_subset == 0).dropna(how = 'all')
-                dqi = meta.index
-                X_scaled = X_scaled[dqi]
-                y = y[dqi]
+                ##if test_dataset is None, do the split anyway...
                 
-            if sigma != 0:
-                lmask = label_mask(meta, sigma = sigma)
-                yrest = y[~lmask]
-                X_rest = X_scaled[~lmask,:]
-                y = y[lmask]
-                X_scaled = X_scaled[lmask,:]
-                #print(y.shape,X_scaled.shape)
-                #print(yrest.shape,X_rest.shape)
+                #train_loader = DataLoader(dataset = train_dataset, batch_size = hps['batch_size'], shuffle = True)
+                #test_loader = DataLoader(dataset = test_dataset, batch_size = hps['batch_size'], shuffle = False)
 
-            dataset = RegressionDataset(X_scaled, y)
+            else:
+                feats = torch.load(os.path.join(self.output_dir, ffile)).cpu()
+                if self.config['tags']['pca'] !=0:
+                    feats, _, _ = fit_pca(feats, n_components = self.config['tags']['pca'])
 
-            try:
-                train_dataset, val_dataset, test_dataset = random_split(dataset, lengths=[0.7,0.2,0.1], generator=torch.Generator().manual_seed(self.config['tasks']['linear']['seed'])) #what if no classify?
-            except ValueError:
-                tlen = int(0.7*len(dataset))
-                vlen = int(0.2*len(dataset))
-                train_dataset, val_dataset, test_dataset = random_split(dataset, lengths=[tlen, vlen, len(dataset) - (tlen + vlen)], generator=torch.Generator().manual_seed(self.config['tasks']['linear']['seed']))
+                labels = self._get_crop_labels(lfile)
+                y = labels[quant].values
+                nanidx = np.where(np.isnan(y))[0]
+                X_scaled = StandardScaler().fit_transform(feats)
+                X_scaled= np.delete(X_scaled,nanidx,axis=0)
+                y = np.delete(y,nanidx,axis=0)
+                meta = labels.drop(nanidx).reset_index(drop=True) 
+                
+                if dqf is not None:
+                    X_scaled, y, meta = self._select_dqf(X_scaled, y, meta, dqf = dqf) #don't know how this combines with sigma
+
+                if unseen:
+                    meta = meta.where(meta.in_subset == 0).dropna(how = 'all')
+                    dqi = meta.index
+                    X_scaled = X_scaled[dqi]
+                    y = y[dqi]
+
+                if sigma != 0:
+                    lmask = label_mask(meta, sigma = sigma)
+                    yrest = y[~lmask]
+                    X_rest = X_scaled[~lmask,:]
+                    y = y[lmask]
+                    X_scaled = X_scaled[lmask,:]
+                    #print(y.shape,X_scaled.shape)
+                    #print(yrest.shape,X_rest.shape)
+
+                dataset = RegressionDataset(X_scaled, y)
+
+                try:
+                    train_dataset, val_dataset, test_dataset = random_split(dataset, lengths=[0.7,0.2,0.1], generator=torch.Generator().manual_seed(self.config['tasks']['linear']['seed'])) #what if no classify?
+                except ValueError:
+                    tlen = int(0.7*len(dataset))
+                    vlen = int(0.2*len(dataset))
+                    train_dataset, val_dataset, test_dataset = random_split(dataset, lengths=[tlen, vlen, len(dataset) - (tlen + vlen)], generator=torch.Generator().manual_seed(self.config['tasks']['linear']['seed']))
             
+            #print(len(train_dataset), len(val_dataset))
             train_losses, val_losses, model  = run_linregress(train_dataset, val_dataset, num_epochs = num_epochs, verbose = self.verbose)
             #if args.save_model is not None and nn == "MGCLS":
             #    torch.save(model.state_dict(),os.path.join(args.save_model, "linear_model.pth"))
-            if not split:
-                test_dataset = dataset
+            if not test_dataset in locals():
+                test_dataset = val_dataset
             mets, y_pred, y_true = eval_linregress(test_dataset, None, model) #need to get all...
             print(f"Linear regression with {len(test_dataset)} frozen features from {ffile} to {quant}, DQF={dqf}")
             print(f"MSE: {mets[0]:.3f}") #\n R2: {mets[1]:.3f}")
@@ -283,9 +325,11 @@ class Evaluator():
     def class_eval(self):
         hps = self.config['tasks']['classify']['hps']
         num_classes = self._get_num_classes()
-        dense_layers = hps['dense_layers']
-        nlabels = hps['n_train_labels']
-        print("num classes", num_classes, "number of training labels", nlabels)
+        dense_layers = 1
+        nlabels = None
+        #dense_layers = hps['dense_layers']
+        #nlabels = hps['n_train_labels']
+        #print("num classes", num_classes, "number of training labels", nlabels)
         
         for ffile, lfile in zip(self.config['tasks']['classify']['input'], self.config['tasks']['classify']['labels']):
             trainfile = ffile["train"]
@@ -398,17 +442,17 @@ class Evaluator():
 #             fig = plot_simsearch_example(tidx, idx2, imfolder)
 #             wandb.log({"simsearch_example":fig})
 
-    def _get_num_classes(self, return_values = False):
-        labels = pd.read_csv(os.path.join(self.output_dir,self.config['tasks']['classify']['labels'][0]))
+    def _get_num_classes(self, return_values = False, task= 'classify', label_key='simple_labels'):
+        labels = pd.read_csv(os.path.join(self.output_dir,self.config['tasks'][task]['labels'][0]))
         if "has_nan" in labels.keys():
             good_labels = labels.where(labels.has_nan == 0).dropna(how='all')
             train_labels = good_labels.majority_classification.values
             y = train_labels
         if "split" in labels.keys():
-            train_labels = labels.where(labels.split == 'train').dropna(how='all').simple_labels.values
-            test_labels = labels.where(labels.split == 'test').dropna(how='all').simple_labels.values
+            train_labels = labels.where(labels.split == 'train').dropna(how='all')[label_key].values
+            test_labels = labels.where(labels.split == 'test').dropna(how='all')[label_key].values
             try:
-                train_labels = labels.where(labels.split == 'train').dropna(how='all').simple_labels.values.astype(np.int64)
+                train_labels = labels.where(labels.split == 'train').dropna(how='all')[label_key].values.astype(np.int64)
                 y = train_labels
             except TypeError: #test this
                 y = train_labels
@@ -444,11 +488,11 @@ class Evaluator():
             return comp, labels, meta
         
         
-    def _get_FR_feats(self, trainfile, testfile, lfile, seed, nlabels, return_dataset=True):
+    def _get_FR_feats(self, trainfile, testfile, lfile, seed, nlabels, return_dataset=True, task = 'classify', label_key = 'simple_labels'):
         trainfeats = torch.load(os.path.join(self.output_dir,trainfile)).cpu() 
 
         #labels
-        train_labels, test_labels = self._get_num_classes(return_values = True)
+        train_labels, test_labels = self._get_num_classes(return_values = True, task=task, label_key=label_key)
         y = train_labels # pd.read_csv(os.path.join(self.output_dir,lfile))
 
         #if return_dataset: #remove not
@@ -482,7 +526,7 @@ class Evaluator():
             test_feats = StandardScaler().fit_transform(test_feats)
             #else:
             #    test_feats = np.array(test_feats)
-        #print(len(train_feats),len(train_labels))
+        #print(len(train_feats),len(train_labels), len(test_feats), len(test_labels))
         assert len(train_feats) == len(train_labels)
 
         if nlabels: #None if all
