@@ -29,6 +29,18 @@ class ReturnIndexDatasetMB(MBFRConfident):
         return img, idx
 
 class ReturnIndexDatasetF(FIRSTGalaxyData):
-    def __getitem__(self, idx):
-        img, _ = super(ReturnIndexDatasetF, self).__getitem__(idx)
-        return img, idx
+   def __getitem__(self, idx):
+       img, _ = super(ReturnIndexDatasetF, self).__getitem__(idx)
+       return img, idx
+   
+class RegressionDataset(torch.utils.data.Dataset):
+    def __init__(self, X, y):
+        super().__init__()
+        self.X = torch.from_numpy(X.astype('float32'))
+        self.y = torch.from_numpy(y.astype('float32'))
+
+    def __len__(self):
+        return len(self.X)
+    
+    def __getitem__(self, index):
+        return self.X[index], self.y[index].unsqueeze(0)

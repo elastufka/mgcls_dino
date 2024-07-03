@@ -1,4 +1,5 @@
 import numpy as np
+import argparse
 from astropy.io import fits
 from astropy.wcs import WCS
 from astropy.nddata import Cutout2D
@@ -30,6 +31,7 @@ def mapdata_from_fits(fitsfile, return_wcs = True, return_header = False):
                             - (WCS, FITS header, numpy.ndarray): If both return_wcs and return_header are True.
                             - numpy.ndarray: If neither return_wcs nor return_header is True."""
     with fits.open(fitsfile) as f:
+
         header = f[0].header
         wcs = WCS(header)
         dat = f[0].data.squeeze()
@@ -159,7 +161,7 @@ def MGCLS4ML(parent_dir = '.', ftype = "5pln", crop_shape = (256,256), sname = N
     for source in sources:
         sname = MGCLS_format_source_name(source)
         
-        #fix inconsistencies between source name and file names
+        #fix inconsistencies between source name and file names. there might be more.
         if sname == "RXCJ1314.4-2515":
             sname = "RXCJ1314"
         elif sname == "RXCJ0225.1-2928":
@@ -181,6 +183,7 @@ def MGCLS4ML(parent_dir = '.', ftype = "5pln", crop_shape = (256,256), sname = N
             n = earr[0].shape[0]//crop_shape[0] #assuming square image for now
             stridex = calc_stride(earr[0].shape[0], crop_shape[0], n+1) #some overlap is okay, but minimize it
             stridey = stridex
+            
         crops, coords = crops_and_coords(ewcs, earr, crop_shape = crop_shape, stridex = stridex, stridey = stridey)
         if writenpy:
             fname = enhanced[enhanced.rfind("/")+1:enhanced.find(".fits")]
@@ -193,17 +196,12 @@ def MGCLS4ML(parent_dir = '.', ftype = "5pln", crop_shape = (256,256), sname = N
         #elif writefits: #write FITS files instead
             #TBI
         else:
-            # testcrop = crops[50]
-            # testwcs = WCS(testcrop.header)
-            # #print(testwcs.celestial.pixel_to_world(0,0).to_string("hmsdms"), testwcs.celestial.pixel_to_world(255,255).to_string("hmsdms"))
-            # ax=plt.subplot(projection=testwcs.celestial)
-            # #ax = plt.gca()
-            # #ra = ax.coords[0]
-            # #ra.set_format_unit('degree')
-            # plt.imshow(testcrop.data,vmin=1e-7,vmax=1e-4)
-            # plt.savefig(f"{sname}_test_crop2.png")
-            # print(coords[50][0].to_string("hmsdms"))
-            # print(coords[50][1].to_string("hmsdms"))
+            testcrop = crops[50]
+            testwcs = WCS(testcrop.header)
+            ax=plt.subplot(projection=testwcs.celestial)
+            plt.imshow(testcrop.data,vmin=1e-7,vmax=1e-4)
+            plt.savefig(f"{sname}_test_crop2.png")
+
             return crops, coords
         
 def crops_and_coords(wcs, dat, crop_shape = (256,256), stridex = None, stridey = None, reject_nan = True, percent_nan = .4, header_stats = None):
@@ -242,8 +240,8 @@ def crops_and_coords(wcs, dat, crop_shape = (256,256), stridex = None, stridey =
     yhalf = crop_shape[0]/2
     x,y = 0,0
     bad_crops = 0
-    #i=0
-    
+
+    i=0
     while y < ypix:
         x = 0
         while x < xpix:
@@ -335,44 +333,7 @@ def calc_stride(dim, crop_dim, n):
     stride = crop_dim - margin
     return stride
 
-def MGCLS_FITS_metadata(data_dir='.', ftype='5pln', plow=2, phigh=98):
-    sources = get_MGCLS_targets() #get source list - can get it from the web if not in dir
-    os.chdir(data_dir)
-
-    headlist = []
-    for source in sources:
-        sname = MGCLS_format_source_name(source)
-        
-        #fix inconsistencies between source name and file names
-        if sname == "RXCJ1314.4-2515":
-            sname = "RXCJ1314"
-        elif sname == "RXCJ0225.1-2928":
-            sname = "RXCJ0225.1-22928"
-        elif sname == "El_Gordo":
-            sname = "ElGordo"
-        try:
-            enhanced = MGCLS_find_file(sname, ftype, enhanced = True)
-        except IndexError:
-            print(f"Skipping source {sname}, file not found..")
-            continue
-
-        print(f"Using file {enhanced}")
-        _, ehead, earr = mapdata_from_fits(enhanced, return_header=True)
-        kk = [k for k in ehead.keys()]
-        vv = [k for k in ehead.values()]
-        dd = {k:v for k,v in zip(kk,vv)}
-        df = pd.DataFrame(dd, index = pd.Index([0]))
-        df["source_name"] = sname
-        df["filename"] = enhanced[enhanced.rfind("/")+1:]
-        if "P2" not in df.keys():
-            df["P2"] = np.nanpercentile(earr[0],plow)
-        if "P98" not in df.keys():
-            df["P98"] = np.nanpercentile(earr[0],phigh)
-        headlist.append(df)
-    meta = pd.concat(headlist)
-    meta.to_csv("MGCLS_FITS_metadata.csv")
-
-def scale_crops(crop_dir, out_dir, meta, method="cs", overwrite=False,**kwargs):
+def scale_crops(crop_dir, out_dir, meta, method="cs", **kwargs):
     """
     This function scales the crops located in the 'crop_dir' directory according to the parameters extracted from the entire image.
     It reads metadata from the CSV file specified in the 'meta' parameter.
@@ -563,30 +524,9 @@ def plot_image_catalog_page(images, annotations, bounding_boxes = True, segmenta
     return fig
 
 if __name__ == '__main__':
-    #example usage for the source Abell 13
-    datadir = "/home/users/l/lastufka/scratch/MGCLS_data"
-    output_dir = "/home/users/l/lastufka/scratch/MGCLS_data/enhanced/test_data_prep"
-    output_dir_cs = "/home/users/l/lastufka/scratch/MGCLS_data/enhanced/test_data_prep_cs"
-    metafile = "/home/users/l/lastufka/scratch/MGCLS_data/enhanced/MGCLS_FITS_metadata.csv"
-    #MGCLS4ML(datadir, output_dir=output_dir,  writenpy=True) #sname="Abell_13",
-    #MGCLS_FITS_metadata() #generate metadata file from FITS headers if one does not yet exist
-    #scale_crops(output_dir,  output_dir_cs, meta = metafile)
-    # try:
-    #     #pyBDSF compact source catalogs to COCO format
-    #     os.system(f"python ~/pyBDSF_to_COCO/pyBDSF_to_COCO.py --image {datadir}/enhanced/FITS/Abell_13_noFix_pol_I_Farcsec_5pln_cor.fits --catalog {datadir}/compact_catalogs/Abell-13_compact_source_catalog.csv --crop_coords {output_dir}/Abell_13_noFix_pol_I_Farcsec_5pln_cor_coords.npy --output_file {output_dir}/Abell_13_noFix_pol_I_Farcsec_5pln_cor_annotations.json --crop_prefix Abell_13_noFix_pol_I_Farcsec_5pln_cor_ --category_names source")
-    # except Exception as e:
-    #     print("No COCO annotations generated!")
-    #     sys.exit(1)
-    #catalog_qc(f"{output_dir}/Abell_13_noFix_pol_I_Farcsec_5pln_cor_annotations.json",im_dir=output_dir_cs)
-    #cagg = crop_catalog_aggs([f"{output_dir}/Abell_13_noFix_pol_I_Farcsec_5pln_cor_annotations.json"])
-    #print(cagg.describe()) #see some overall statistics
-    # add per-crop source counts, etc to metadata
-    #TBI
-    #once all COCO catalogs have been generated, combine:
-    from pyBDSF_to_COCO.utils import combine_coco, train_val_split
-    #combine_coco(output_dir, "mgcls_coco_annotations.json")
-    #if desired, do train-test split
-    os.mkdir(os.path.join(output_dir_cs, "train"))
-    os.mkdir(os.path.join(output_dir_cs, "test"))
-    os.chdir(output_dir_cs)
-    train_val_split(os.path.join(output_dir, "mgcls_coco_annotations.json"), "train", "test", test_size = 0.2, random_state=14)
+    parser = argparse.ArgumentParser('Prepare MGCLS data')
+    parser.add_argument('--data_path', default=None, type=str)
+    args = parser.parse_args()
+
+    MGCLS4ML(args.data_path)
+    #scale_crops(out_dir, f"{out_dir}_cs", meta)

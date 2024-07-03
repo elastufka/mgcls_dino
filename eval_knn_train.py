@@ -17,40 +17,31 @@ import sys
 import argparse
 import numpy as np
 import glob
-import pandas as pd
-#path = os.path.join(os.path.dirname(__file__), os.pardir)
-#sys.path.append(path)
-#print(sys.path)
-#import torch_utils
-#sys.path.append('/home/users/l/lastufka/feuerzeug/')
-sys.path.append('/home/users/l/lastufka/fixmatch/main')
-sys.path.append('/home/users/l/lastufka/RadioGalaxyDataset')
+
+#sys.path.append('/home/users/l/lastufka/byol')
+from byol.models import BYOL
+#sys.path.append('/home/users/l/lastufka/fixmatch/main')
+#sys.path.append('/home/users/l/lastufka/RadioGalaxyDataset')
 from firstgalaxydata import FIRSTGalaxyData
 #from fixmatch import evaluation
-from dataloading.datasets import MiraBest_full, MBFRConfident, ReturnIndexDatasetRGZ
-#import feuerzeug
-#from torch_utils import *
+#from dataloading.datasets import MiraBest_full, MBFRConfident, ReturnIndexDatasetRGZ
+
 import torch
 from torch import nn
 import torch.distributed as dist
 import torch.backends.cudnn as cudnn
 
-#from torchvision.datasets import DatasetFolder, CIFAR10
 from torchvision import transforms as pth_transforms
 from torchvision import models as torchvision_models
 
 import utils
 import vision_transformer as vits
 from eval_knn import extract_features
-from MeerKATDataset import MGCLSDataset
-from NumPyDataset import NumpyFolderDataset
+from EvaluationDatasets import ReturnIndexDataset, ReturnIndexDatasetMB, ReturnIndexDatasetF 
 from transforms import FakeChannels
 
 def extract_train_feature_pipeline(args):
     """same as in eval_knn.py but only for the train dataset, no labels"""
-    import vision_transformer as vits
-    from eval_knn import extract_features
-    
     if args.in_chans == 1:
         tt = nn.Identity()
     else:
@@ -64,38 +55,20 @@ def extract_train_feature_pipeline(args):
         tlist.append(pth_transforms.RandomAutocontrast(p=1))
 
     transform = pth_transforms.Compose(tlist)
-    
-    #mgcls_data = MGCLSDataset(args.data_path, metadata = None, transform=transform, fake_3chan = False)
-    #mgcls_sub = 
-    #dataset = MGCLSDataset(args.data_path,transform=transform, fake_3chan=False, metadata = args.metadata_path, scaling = None)
-    #print(len(dataset))
-    if isinstance(args.subset_length, int):
-        nfiles = glob.glob(os.path.join(args.data_path,"*.npy"))
-        #print(len(nfiles))
-        np.random.seed(seed=42)
-        indices = np.random.choice(len(nfiles), size = args.subset_length, replace=False)
-    else:
-        indices = None
         
     if "MiraBest" in args.data_path:
         print(f"Evaluating on MiraBest train = {args.train}")
-        dataset_train = ReturnIndexDataset2(args.data_path, train=args.train, transform=transform)
+        dataset_train = ReturnIndexDatasetMB(args.data_path, train=args.train, transform=transform)
         print(f"Data loaded with {len(dataset_train)} train imgs.")
     elif "FIRST" in args.data_path:
         print(f"Evaluating on RadioGalaxyDataset = {args.train}")
         tt = 'train' if args.train else 'test'
         dataset_train = ReturnIndexDatasetF(root=args.data_path, selected_split=tt, input_data_list=["galaxy_data_h5.h5"], transform=transform)
-    elif "rgz" in args.data_path:
-        dataset_train = ReturnIndexDatasetRGZ(args.data_path, train=args.train, transform=transform)
+    #elif "rgz" in args.data_path:
+    #    dataset_train = ReturnIndexDatasetRGZ(args.data_path, train=args.train, transform=transform)
     else:
         dataset_train = ReturnIndexDataset(args.data_path,transform=transform,labels=None, fake_3chan=False, metadata = args.metadata_path, scaling=None)
-    #print(len(dataset), type(dataset))
-    #dataset_train = ReturnIndexDataset(dataset)
-    #testtup = dataset_train[0]
-    #print(type(testtup))
-    print("dataset_train", len(dataset_train))
-    #dataset_train = CIFAR10(root="~/scratch/cifar10", transform = pth_transforms.ToTensor())
-    #dataset_train = ReturnIndexDataset(cifar10)#ReturnIndexDataset(args.data_path, transform=transform)
+
     sampler = torch.utils.data.DistributedSampler(dataset_train, shuffle=False)
     data_loader_train = torch.utils.data.DataLoader(
         dataset_train,
@@ -115,7 +88,7 @@ def extract_train_feature_pipeline(args):
         if args.patch_size == 14:
             model = torch.hub.load('facebookresearch/dinov2', 'dinov2_vits14_reg')
             #print(model)
-                
+            
         else:
             model = vits.__dict__[args.arch](patch_size=args.patch_size, num_classes=0, in_chans = args.in_chans)
         print(f"Model {args.arch} {args.patch_size}x{args.patch_size} built.")
@@ -128,11 +101,7 @@ def extract_train_feature_pipeline(args):
         state_dict = torch.load(model_path, map_location="cuda")['state_dict']
         state_dict = {k.replace("encoder.","") : v for k,v in state_dict.items()}
         state_dict = {k.replace("layers","layer") : v for k,v in state_dict.items()}
-        print(state_dict.keys())
-        #state_dict = {}
-        #length = len(model.encoder.state_dict())
-        #for name, param in zip(model.encoder.state_dict(), list(checkpoint.values())[:length]):
-        #    state_dict[name] = param
+
         model.load_state_dict(state_dict, strict=True)
         model.eval()
         
@@ -141,7 +110,7 @@ def extract_train_feature_pipeline(args):
             image_size = 256,
             hidden_layer = 'avgpool')
         
-        projection, embedding = learner(data_loader_train, return_embedding = True)
+        _, embedding = learner(data_loader_train, return_embedding = True)
         torch.save(embedding.cpu(), os.path.join(args.dump_features, "trainfeat.pth"))
         return
     elif args.arch in torchvision_models.__dict__.keys():
@@ -172,33 +141,6 @@ def extract_train_feature_pipeline(args):
         torch.save(train_features.cpu(), os.path.join(args.dump_features, "trainfeat.pth"))
         #torch.save(train_labels.cpu(), os.path.join(args.dump_features, "trainlabels.pth"))
 
-    #get filenames aka the order from the data loader
-    # labels = []
-    # with torch.no_grad():
-    #     for i, images in enumerate(data_loader_train,0):
-    #         labels.append(images[1])
-    # fdf = pd.DataFrame(labels)
-    # fdf.to_csv(os.path.join(args.dump_features, "labels.csv"))
-    # return train_features#, train_labels
-
-
-class ReturnIndexDataset(MGCLSDataset):
-   def __getitem__(self, idx):
-       #print(type(self))
-       #print(type(self.data))
-       #print(self)
-       img = super(ReturnIndexDataset, self).__getitem__(idx)
-       return img, idx
-
-class ReturnIndexDataset2(MBFRConfident):
-   def __getitem__(self, idx):
-       img, _ = super(ReturnIndexDataset2, self).__getitem__(idx)
-       return img, idx
-
-class ReturnIndexDatasetF(FIRSTGalaxyData):
-   def __getitem__(self, idx):
-       img, _ = super(ReturnIndexDatasetF, self).__getitem__(idx)
-       return img, idx
    
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('Evaluation with weighted k-NN on ImageNet')
@@ -224,13 +166,11 @@ if __name__ == '__main__':
         distributed training; see https://pytorch.org/docs/stable/distributed.html""")
     parser.add_argument("--local_rank", default=0, type=int, help="Please ignore and do not set this argument.")
     parser.add_argument('--data_path', default='/path/to/imagenet/', type=str)
-    parser.add_argument('--metadata_path', default=None, type=str)
-    parser.add_argument('--subset_length', default=None, type=int)
+    #parser.add_argument('--metadata_path', default=None, type=str)
     parser.add_argument('--in_chans', default = 1, type = int, help = 'Length of subset of dataset to use.')
     parser.add_argument('--center_crop', default = 0, type = int, help = 'Length of subset of dataset to use.')
     parser.add_argument('--autocontrast', action='store_true', help = 'Length of subset of dataset to use.')
 
-    #parser.add_argument('--clean_path', default=None)
     parser.add_argument('--train', default=True, type=utils.bool_flag,
         help="Should we store the features on GPU? We recommend setting this to False if you encounter OOM")
     args = parser.parse_args()
@@ -249,16 +189,4 @@ if __name__ == '__main__':
         # need to extract features !
         train_features = extract_train_feature_pipeline(args)
 
-    #if utils.get_rank() == 0:
-        #if args.use_cuda:
-        #    train_features = train_features.cuda()
-            #test_features = test_features.cuda()
-            #train_labels = train_labels.cuda()
-            #test_labels = test_labels.cuda()
-
-        #print("Features are ready!\nStart the k-NN classification.")
-        #for k in args.nb_knn:
-        #    top1, top5 = knn_classifier(train_features, train_labels,
-        #        test_features, test_labels, k, args.temperature)
-        #    print(f"{k}-NN classifier result: Top1: {top1}, Top5: {top5}")
     dist.barrier()
