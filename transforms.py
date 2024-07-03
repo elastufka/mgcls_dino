@@ -125,7 +125,6 @@ class PowerlawTransform(object):
             C = torch.max(sample)
         else:
             C = self.C
-        print(self.C)
         I_norm = (sample/C)**self.power
         return (I_norm - 0.5)/0.5
 

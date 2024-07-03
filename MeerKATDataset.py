@@ -58,7 +58,7 @@ class NumpyFolderDataset(DatasetFolder):
 
 class MeerKATDataset(NumpyFolderDataset):
     def __init__(self, data, indices=None, labels=None, transform=None, loader=None, metadata=None):
-        super().__init__(data, indices=indices, labels=labels, transform=transform, loader=loader, metadata=metadata)
+        super().__init__(data, indices=indices, transform=transform, loader=loader)
         #self.transform = transform
         self.labels_from = labels
         if metadata is not None:
@@ -86,15 +86,15 @@ class MeerKATDataset(NumpyFolderDataset):
         return label
 
 class MIGHTEEDataset(MeerKATDataset):
-    def __init__(self, data, labels="source", transform=None, loader=None, fake_3chan = True, scaling = 'contrast'):
-        super().__init__(data, labels=labels, transform=transform, loader = loader, fake_3chan = fake_3chan, scaling = scaling)
+    def __init__(self, data, labels="source", transform=None, loader=None):
+        super().__init__(data, labels=labels, transform=transform, loader = loader)
         
     def label_from_source(self, filename):
         return "COSMOS" if "COSMOS" in filename else "XMMLSS"
     
 class MGCLSDataset(MeerKATDataset):
-    def __init__(self, data, indices = None, labels=None, transform=None, loader=None, fake_3chan = True, metadata = None, scaling = 'contrast'):
-        super().__init__(data, indices=indices, labels=labels, transform=transform, loader = loader, fake_3chan = fake_3chan, metadata = metadata, scaling = scaling)
+    def __init__(self, data, indices = None, labels=None, transform=None, loader=None, metadata = None, ):
+        super().__init__(data, indices=indices, labels=labels, transform=transform, loader = loader, metadata = metadata)
         self.data_product = "basic" if "basic" in data else "enhanced"
 
 # class ReturnIndexDataset(MGCLSDataset):

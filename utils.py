@@ -68,6 +68,7 @@ class Solarization(object):
         else:
             return img
 
+
 def load_pretrained_weights(model, pretrained_weights, checkpoint_key, model_name, patch_size):
     if os.path.isfile(pretrained_weights):
         state_dict = torch.load(pretrained_weights, map_location="cpu")
@@ -149,7 +150,7 @@ def cancel_gradients_last_layer(epoch, model, freeze_last_layer):
             p.grad = None
 
 
-def restart_from_checkpoint(ckp_path, run_variables=None, arch='vit_small',in_chans=3, **kwargs):
+def restart_from_checkpoint(ckp_path, run_variables=None, **kwargs):
     """
     Re-start from checkpoint
     """
@@ -159,22 +160,12 @@ def restart_from_checkpoint(ckp_path, run_variables=None, arch='vit_small',in_ch
 
     # open checkpoint file
     checkpoint = torch.load(ckp_path, map_location="cpu")
-    
+
     # key is what to look for in the checkpoint file
     # value is the object to load
     # example: {'state_dict': model}
     for key, value in kwargs.items():
         if key in checkpoint and value is not None:
-            if key in ['student', 'teacher'] and in_chans == 1:
-                if 'vit' in arch:
-                    kk = 'backbone.patch_embed.proj.weight' if key == 'teacher' else 'module.backbone.patch_embed.proj.weight'
-                elif arch == 'resnet50':
-                    kk = 'module.backbone.conv1.weight'
-                patchweight = checkpoint[key][kk] 
-                pshape = patchweight.shape
-                #print(pshape)
-                checkpoint[key][kk] = patchweight[:,0,:,:].reshape((pshape[0],1,pshape[2],pshape[3]))
-                #print(key, checkpoint[key][kk].shape)
             try:
                 msg = value.load_state_dict(checkpoint[key], strict=False)
                 print("=> loaded '{}' from checkpoint '{}' with msg {}".format(key, ckp_path, msg))
@@ -184,7 +175,6 @@ def restart_from_checkpoint(ckp_path, run_variables=None, arch='vit_small',in_ch
                     print("=> loaded '{}' from checkpoint: '{}'".format(key, ckp_path))
                 except ValueError:
                     print("=> failed to load '{}' from checkpoint: '{}'".format(key, ckp_path))
-                    
         else:
             print("=> key '{}' not found in checkpoint: '{}'".format(key, ckp_path))
 
@@ -348,13 +338,6 @@ class MetricLogger(object):
                 "{}: {}".format(name, str(meter))
             )
         return self.delimiter.join(loss_str)
-    
-    def __dict__(self):
-        loss_dict = {}
-        for name, meter in self.meters.items():
-            loss_dict[name] = float(str(meter).split(' ')[0]) #.append("{}: {}".format(name, str(meter)))
-        return loss_dict
-
 
     def synchronize_between_processes(self):
         for meter in self.meters.values():
@@ -484,7 +467,6 @@ def setup_for_distributed(is_master):
 
 def init_distributed_mode(args):
     # launched with torch.distributed.launch
-    #os.environ['MASTER_ADDR'] = '127.0.0.1'
     if 'RANK' in os.environ and 'WORLD_SIZE' in os.environ:
         args.rank = int(os.environ["RANK"])
         args.world_size = int(os.environ['WORLD_SIZE'])
@@ -493,20 +475,16 @@ def init_distributed_mode(args):
     elif 'SLURM_PROCID' in os.environ:
         args.rank = int(os.environ['SLURM_PROCID'])
         args.gpu = args.rank % torch.cuda.device_count()
-        os.environ['MASTER_ADDR'] = '127.0.0.1'
-        os.environ['MASTER_PORT'] = '29600'
     # launched naively with `python main_dino.py`
     # we manually add MASTER_ADDR and MASTER_PORT to env variables
     elif torch.cuda.is_available():
         print('Will run the code on one GPU.')
         args.rank, args.gpu, args.world_size = 0, 0, 1
         os.environ['MASTER_ADDR'] = '127.0.0.1'
-        os.environ['MASTER_PORT'] = '29600'
+        os.environ['MASTER_PORT'] = '29500'
     else:
         print('Does not support training without GPU.')
         sys.exit(1)
-
-    #os.environ['MASTER_PORT'] = '29600'
 
     dist.init_process_group(
         backend="nccl",
@@ -663,7 +641,6 @@ def get_params_groups(model):
             not_regularized.append(param)
         else:
             regularized.append(param)
-
     return [{'params': regularized}, {'params': not_regularized, 'weight_decay': 0.}]
 
 
