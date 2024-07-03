@@ -97,8 +97,8 @@ class MGCLSDataset(MeerKATDataset):
         super().__init__(data, indices=indices, labels=labels, transform=transform, loader = loader, fake_3chan = fake_3chan, metadata = metadata, scaling = scaling)
         self.data_product = "basic" if "basic" in data else "enhanced"
 
-class ReturnIndexDataset(MGCLSDataset):
-    def __getitem__(self, idx):
-        img = super(ReturnIndexDataset, self).__getitem__(idx)
-        return img, idx
+# class ReturnIndexDataset(MGCLSDataset):
+#     def __getitem__(self, idx):
+#         img = super(ReturnIndexDataset, self).__getitem__(idx)
+#         return img, idx
 
