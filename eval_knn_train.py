@@ -1,27 +1,10 @@
-
-# Copyright (c) Facebook, Inc. and its affiliates.
-# 
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-# 
-#     http://www.apache.org/licenses/LICENSE-2.0
-# 
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
 import os
 import sys
 import argparse
-import numpy as np
-import glob
 
-#sys.path.append('/home/users/l/lastufka/byol')
-from byol.models import BYOL
-#sys.path.append('/home/users/l/lastufka/fixmatch/main')
-#sys.path.append('/home/users/l/lastufka/RadioGalaxyDataset')
+#from byol.models import BYOL
+#sys.path.append('/path/to/fixmatch/main')
+#sys.path.append('/path/to/RadioGalaxyDataset')
 from firstgalaxydata import FIRSTGalaxyData
 #from fixmatch import evaluation
 #from dataloading.datasets import MiraBest_full, MBFRConfident, ReturnIndexDatasetRGZ
@@ -94,30 +77,30 @@ def extract_train_feature_pipeline(args):
         print(f"Model {args.arch} {args.patch_size}x{args.patch_size} built.")
     elif "xcit" in args.arch:
         model = torch.hub.load('facebookresearch/xcit:main', args.arch, num_classes=0)
-    elif args.arch == "resnet18": #byol
-        model = torchvision_models.resnet18().cuda()
-        #load state dict
-        model_path = args.pretrained_weights
-        state_dict = torch.load(model_path, map_location="cuda")['state_dict']
-        state_dict = {k.replace("encoder.","") : v for k,v in state_dict.items()}
-        state_dict = {k.replace("layers","layer") : v for k,v in state_dict.items()}
+    # elif args.arch == "resnet18": #byol
+    #     model = torchvision_models.resnet18().cuda()
+    #     #load state dict
+    #     model_path = args.pretrained_weights
+    #     state_dict = torch.load(model_path, map_location="cuda")['state_dict']
+    #     state_dict = {k.replace("encoder.","") : v for k,v in state_dict.items()}
+    #     state_dict = {k.replace("layers","layer") : v for k,v in state_dict.items()}
 
-        model.load_state_dict(state_dict, strict=True)
-        model.eval()
+    #     model.load_state_dict(state_dict, strict=True)
+    #     model.eval()
         
-        learner = BYOL(
-            model,
-            image_size = 256,
-            hidden_layer = 'avgpool')
+    #     learner = BYOL(
+    #         model,
+    #         image_size = 256,
+    #         hidden_layer = 'avgpool')
         
-        _, embedding = learner(data_loader_train, return_embedding = True)
-        torch.save(embedding.cpu(), os.path.join(args.dump_features, "trainfeat.pth"))
-        return
+    #     _, embedding = learner(data_loader_train, return_embedding = True)
+    #     torch.save(embedding.cpu(), os.path.join(args.dump_features, "trainfeat.pth"))
+    #     return
     elif args.arch in torchvision_models.__dict__.keys():
         model = torchvision_models.__dict__[args.arch](num_classes=0)
         if args.in_chans != 3:
             model.conv1 = nn.Conv2d(args.in_chans, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
-        if args.arch == "resnet18":
+        if args.arch == "resnet18": #after converting the checkpoint keys to Torchvision names
             model.conv1 = nn.Conv2d(1, 64, kernel_size=(3, 3), stride=(2, 2), padding=(3, 3), bias=False)
 
         model.fc = nn.Identity()

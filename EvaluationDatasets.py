@@ -1,8 +1,8 @@
 import sys
 import torch
-sys.path.append('/home/users/l/lastufka/fixmatch/main')
+sys.path.append('/path/to/fixmatch/main')
 from dataloading.datasets import MiraBest_full, MBFRConfident, ReturnIndexDatasetRGZ
-sys.path.append('/home/users/l/lastufka/RadioGalaxyDataset')
+sys.path.append('/path/to/RadioGalaxyDataset')
 from firstgalaxydata import FIRSTGalaxyData
 from MeerKATDataset import MGCLSDataset
 

@@ -2,10 +2,6 @@ import glob
 import torch
 import os
 import numpy as np
-import sys
-#sys.path.append("/home/users/l/lastufka/solar_all_purpose")
-#sys.path.append("/home/users/l/lastufka/astro_all_purpose")
-#sys.path.append("/home/users/l/lastufka/mightee_dino")
 
 #from scipy.ndimage import gaussian_filter
 from sklearn.decomposition import PCA
@@ -34,10 +30,10 @@ def default_config(output_dir, arch="vit_small", ep = 100, all = False):
             "augmentations": "standard",
             "datasets":[{"linear":"MGCLS","classify":"MiraBest","similarity":"MiraBest"}]}
     tasks = {"log":{"input":"log.txt"},
-             "tsne":{"input":[f"trainfeat_{arch}_{ep}.pth"],"labels":["/home/users/l/lastufka/scratch/MGCLS_data/basic/crops_256/crops_256_full_metadata2.csv"]},
-            "linear":{"input":[f"trainfeat_{arch}_{ep}.pth",f"mightee_trainfeat_{arch}_{ep}.pth"],"labels":["/home/users/l/lastufka/scratch/MGCLS_data/basic/crops_256/crops_256_full_metadata2.csv","/home/users/l/lastufka/scratch/MIGHTEE/early_science/MIGHTEE_crops_224_metadata.csv"],"quant":"iscrowd_count","epochs":100},
-             "classify":{"input":[{"train":f"mb_trainfeat_{arch}_{ep}.pth","test":f"mb_testfeat_{arch}_{ep}.pth"},{"train":f"mighteeFR_trainfeat_{arch}_{ep}.pth","test":None},{"train":f"FIRST_trainfeat_{arch}_{ep}.pth","test":f"FIRST_testfeat_{arch}_{ep}.pth"}], "labels":["/home/users/l/lastufka/scratch/MiraBest/labels_confident.csv","/home/users/l/lastufka/scratch/MIGHTEE/extended_gz_catalog.csv","/home/users/l/lastufka/scratch/FIRSTGalaxyData/train_test_labels.csv"], "hps":{"lr":0.005,"seed":14,"batch_size":16, "epochs":400}},
-             "similarity":{"input":[{"train":f"mb_trainfeat_{arch}_{ep}.pth","test":f"mb_testfeat_{arch}_{ep}.pth"},{"train":f"mighteeFR_trainfeat_{arch}_{ep}.pth","test":None}], "labels":["/home/users/l/lastufka/scratch/MiraBest/labels_confident.csv","/home/users/l/lastufka/scratch/MIGHTEE/extended_gz_catalog.csv"]}}
+             "tsne":{"input":[f"trainfeat_{arch}_{ep}.pth"],"labels":["scratch/MGCLS_data/basic/crops_256/crops_256_full_metadata2.csv"]},
+            "linear":{"input":[f"trainfeat_{arch}_{ep}.pth",f"mightee_trainfeat_{arch}_{ep}.pth"],"labels":["scratch/MGCLS_data/basic/crops_256/crops_256_full_metadata2.csv","scratch/MIGHTEE/early_science/MIGHTEE_crops_224_metadata.csv"],"quant":"iscrowd_count","epochs":100},
+             "classify":{"input":[{"train":f"mb_trainfeat_{arch}_{ep}.pth","test":f"mb_testfeat_{arch}_{ep}.pth"},{"train":f"mighteeFR_trainfeat_{arch}_{ep}.pth","test":None},{"train":f"FIRST_trainfeat_{arch}_{ep}.pth","test":f"FIRST_testfeat_{arch}_{ep}.pth"}], "labels":["scratch/MiraBest/labels_confident.csv","scratch/MIGHTEE/extended_gz_catalog.csv","scratch/FIRSTGalaxyData/train_test_labels.csv"], "hps":{"lr":0.005,"seed":14,"batch_size":16, "epochs":400}},
+             "similarity":{"input":[{"train":f"mb_trainfeat_{arch}_{ep}.pth","test":f"mb_testfeat_{arch}_{ep}.pth"},{"train":f"mighteeFR_trainfeat_{arch}_{ep}.pth","test":None}], "labels":["scratch/MiraBest/labels_confident.csv","scratch/MIGHTEE/extended_gz_catalog.csv"]}}
     config = {"output_dir":output_dir,"tasks": tasks, "tags":tags, "all": all}
     return config
 
@@ -160,7 +156,7 @@ def build_faiss_idx(feats):
     return index
 
 class Evaluator():
-    def __init__(self, config, project, entity='elastufka', log_best = False):
+    def __init__(self, config, project, entity=None, log_best = False):
         self.config = config
         self.project = project
         self.entity = entity
@@ -414,11 +410,11 @@ class Evaluator():
 #             train_dataset, test_dataset = get_FR_feats(args, seed, mirabest=mirabest)
 #             idx2 = (test_dataset.indices[idx], test_labels[idx])
 #             tidx = [(train_dataset.indices[i],train_labels[i]) for i in I[0]]
-#             imfolder = '/home/users/l/lastufka/scratch/MIGHTEE/FRI-FRII_crops_cs'
+#             imfolder = 'scratch/MIGHTEE/FRI-FRII_crops_cs'
 #         else:
 #             idx2 = idx
 #             tidx = I[0]
-#             imfolder = '/home/users/l/lastufka/scratch/MiraBest'
+#             imfolder = 'scratch/MiraBest'
 
 #         if example:
 #             fig = plot_simsearch_example(tidx, idx2, imfolder)
@@ -517,7 +513,7 @@ class Evaluator():
         
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('Evaluation tasks')
-    parser.add_argument('--config', default=None, type=str, help='config yaml file') #"/home/users/l/lastufka/mightee_dino/eval.yaml"
+    parser.add_argument('--config', default=None, type=str, help='config yaml file')
     parser.add_argument('--project', default="test_eval", type=str, help='name of W&B project')
     parser.add_argument('--log_best', action="store_true", help='name of W&B project')
     args = parser.parse_args()
