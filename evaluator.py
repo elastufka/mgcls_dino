@@ -143,8 +143,6 @@ def do_sim_search(feats, labels, index, idx_labels, k, top=1):
         lab = int(labels[i])
         _, I = index.search(f.reshape((1,d)), k)
         ilabs = idx_labels[I[0][:top]]
-        #print(lab, ilabs)
-        #if lab in ilabs:
         intop += sum([1 if l == lab else 0 for l in ilabs])
     return intop/(len(feats)*top)
 
@@ -240,14 +238,29 @@ class Evaluator():
         seed = self.config['tasks']['linear']['seed']
                 
         for ffile, lfile in zip(self.config['tasks']['linear']['input'], self.config['tasks']['linear']['labels']):
-            if isinstance(ffile, dict): #train/test split already done
-                trainfile = ffile["train"]
-                testfile = ffile["test"]
-                train_dataset, test_dataset = self._get_FR_feats(trainfile, testfile, lfile, seed, None, task='linear', label_key='iscrowd_count')
-                #print(len(train_dataset), len(test_dataset))
-                val_dataset = test_dataset
+            if ffile.endswith(".pth"):
+                feats = torch.load(os.path.join(self.output_dir, ffile)).cpu()
+            else: 
+                feats = np.load(os.path.join(self.output_dir, ffile))
+            if self.config['tags']['pca'] !=0:
+                feats, _, _ = fit_pca(feats, n_components = self.config['tags']['pca'])
+
+            labels = self._get_crop_labels(lfile)
+            y = labels[quant].values
+            nanidx = np.where(np.isnan(y))[0]
+            X_scaled = StandardScaler().fit_transform(feats)
+            X_scaled= np.delete(X_scaled,nanidx,axis=0)
+            y = np.delete(y,nanidx,axis=0)
+            meta = labels.drop(nanidx).reset_index(drop=True) 
                 
-                ##if test_dataset is None, do the split anyway...
+            if dqf is not None:
+                X_scaled, y, meta = self._select_dqf(X_scaled, y, meta, dqf = dqf) #don't know how this combines with sigma
+        
+            if unseen:
+                meta = meta.where(meta.in_subset == 0).dropna(how = 'all')
+                dqi = meta.index
+                X_scaled = X_scaled[dqi]
+                y = y[dqi]
                 
             if sigma != 0:
                 lmask = label_mask(meta, sigma = sigma)
@@ -311,37 +324,49 @@ class Evaluator():
                 
     def class_eval(self):
         hps = self.config['tasks']['classify']['hps']
-        num_classes = self._get_num_classes()
-        dense_layers = 1
-        nlabels = None
-        #dense_layers = hps['dense_layers']
-        #nlabels = hps['n_train_labels']
+        lkey = hps['lkey']
+        bottleneck = hps['bottleneck']
+        dense_layers = hps['dense_layers']
+        class_names = hps['class_names']
+        class_weights = hps['class_weights']
+        confmat = hps['confmat']
+        num_classes = self._get_num_classes(lkey=lkey)
+        last_layer = self.config['tags']['last_layer']
+        nlabels = hps['n_train_labels']
         #print("num classes", num_classes, "number of training labels", nlabels)
         
         for ffile, lfile in zip(self.config['tasks']['classify']['input'], self.config['tasks']['classify']['labels']):
             trainfile = ffile["train"]
             testfile = ffile["test"]
-            train_dataset, test_dataset = self._get_FR_feats(trainfile, testfile, lfile, hps['seed'], nlabels)
+            train_dataset, test_dataset = self._get_FR_feats(trainfile, testfile, lfile, hps['seed'], nlabels, lkey =lkey)
+            if nlabels is not None:
+                full_train_dataset, _ = self._get_FR_feats(trainfile, testfile, lfile, hps['seed'], None, lkey =lkey)
+                full_train_loader = DataLoader(dataset = full_train_dataset, batch_size = hps['batch_size'])
 
-            train_loader = torch.utils.data.DataLoader(dataset = train_dataset, batch_size = hps['batch_size'], shuffle = True)
-            test_loader = torch.utils.data.DataLoader(dataset = test_dataset, batch_size = hps['batch_size'], shuffle = False)
+            train_loader = DataLoader(dataset = train_dataset, batch_size = hps['batch_size'], shuffle = True)
+            test_loader = DataLoader(dataset = test_dataset, batch_size = hps['batch_size'], shuffle = True)
 
             device = 'cuda' if torch.cuda.is_available() else 'cpu'
+            if class_weights is not None:
+                class_weights = torch.Tensor(class_weights).to(device)
             try:
                 in_feats = train_dataset.X.shape[1] 
             except AttributeError:
                 train_dataset.dataset.X.shape[1] 
             if num_classes == 2:
-                criterion = torch.nn.BCELoss()
+                criterion = torch.nn.BCELoss(weight=class_weights)
                 eval_fn = eval_binary
                 nclass = 1
                 class_names = ["FRII","FRI"]
             else:
-                criterion = torch.nn.CrossEntropyLoss()
+                criterion = torch.nn.CrossEntropyLoss(weight=class_weights)
                 eval_fn = eval_multiclass
                 nclass = num_classes
                 class_names = ["FRI","FRII", "C","B"]
-            sclass = LogisticRegression(in_feats, nclass, n_layers = dense_layers).to(device)
+            if dense_layers == 1:
+                sclass = LinearClassifierLayer(in_feats, num_labels=nclass).to(device)
+            else:
+                sclass = LogisticRegression(in_feats, nclass, n_layers = dense_layers, bottleneck = bottleneck).to(device)
             optimizer = torch.optim.SGD(sclass.parameters(), lr = hps['lr']) #change from ADAM to avoid overfitting
             
             acc, frmodel = train_and_eval_model(sclass, train_loader, test_loader, criterion, optimizer, eval_fn, n_eval = 1, n_epochs=hps['epochs'], verbose=self.verbose, confmat=False, keep_best_acc=self.log_best, class_names = class_names)
@@ -363,18 +388,39 @@ class Evaluator():
                         ldict[f"F1 score_{cn}"] = acc[2][i].numpy()
                         ldict[f"precision_{cn}"] = acc[3][i].numpy()
                         ldict[f"recall_{cn}"] = acc[4][i].numpy()
+                    ldict[f"accuracy"] = acc[1].mean(axis=1).numpy() #do i need to average
+                    ldict[f"F1 score"] = acc[2].mean(axis=1).numpy()
+                    ldict[f"precision"] = acc[3].mean(axis=1).numpy()
+                    ldict[f"recall"] = acc[4].mean(axis=1).numpy()
                     print(ldict)
                     wandb.log(ldict)
                 else:
                     wandb.log({"pretrain_epoch":self.config['tags']['pre-training epochs'],f"{dataset} final loss": acc[0], f"{dataset} accuracy": acc[1], f'{dataset} F1 score': acc[2],f'{dataset} precision':acc[3],f'{dataset} recall':acc[4]})
 
-            else:
-                metstr, y_predtr, y_truetr = eval_binary(test_loader, frmodel, return_vals=True)
-                print("Mets", metstr)
-                print("Pred: ", y_predtr)
-                print("True: ", y_truetr)
-                table = wandb.Table(data = [[t,p] for (t,p) in zip(y_truetr, y_predtr)], columns = ["true","predicted"])
-                wandb.log({"binary_results_test" : wandb.plot.scatter(table, "true","predicted", title = f"{dataset}_binary")})
+            if confmat and len(class_names) > 2:
+                _, predictions, ground_truth = eval_fn(test_loader, frmodel, device=device, n_classes=len(class_names), return_vals=True) 
+                wandb.log({"conf_mat" : wandb.plot.confusion_matrix(probs=None,
+                        y_true=ground_truth, preds=predictions,
+                        class_names=class_names)})
+
+            if last_layer:
+                if nlabels is not None:
+                    ltrain, trainl = get_last_layer(frmodel, full_train_loader)
+                else:
+                    ltrain, trainl = get_last_layer(frmodel, train_loader)
+                ltest, testl = get_last_layer(frmodel, test_loader)
+                ll = torch.concat([ltrain, ltest])
+                fn = os.path.join(self.config["output_dir"], f"{self.config['tags']['pre-trained backbone']}_class_ll_{nlabels}.pth")
+                tfn = os.path.join(self.config["output_dir"], f"{self.config['tags']['pre-trained backbone']}_class_ll_labels_{nlabels}.pth")
+                torch.save(ll, fn)
+                #save labels too
+                labs = torch.concat([trainl, testl]).numpy()
+                ldf = pd.DataFrame({'label':labs})
+                ldf.to_csv(tfn)
+                #save it or go directly to TSNE
+                self.config['tasks']['tsne'] = {'input':[fn],'labels': [tfn]}
+                self.do_tsne()
+            
             del sclass
             del frmodel
             
@@ -420,17 +466,17 @@ class Evaluator():
 #             fig = plot_simsearch_example(tidx, idx2, imfolder)
 #             wandb.log({"simsearch_example":fig})
 
-    def _get_num_classes(self, return_values = False, task= 'classify', label_key='simple_labels'):
-        labels = pd.read_csv(os.path.join(self.output_dir,self.config['tasks'][task]['labels'][0]))
+    def _get_num_classes(self, return_values = False, lkey = 'simple_labels'):
+        labels = pd.read_csv(os.path.join(self.output_dir,self.config['tasks']['classify']['labels'][0]))
         if "has_nan" in labels.keys():
             good_labels = labels.where(labels.has_nan == 0).dropna(how='all')
             train_labels = good_labels.majority_classification.values
             y = train_labels
         if "split" in labels.keys():
-            train_labels = labels.where(labels.split == 'train').dropna(how='all')[label_key].values
-            test_labels = labels.where(labels.split == 'test').dropna(how='all')[label_key].values
+            train_labels = labels.where(labels.split == 'train').dropna(how='all')[lkey].values
+            test_labels = labels.where(labels.split == 'test').dropna(how='all')[lkey].values
             try:
-                train_labels = labels.where(labels.split == 'train').dropna(how='all')[label_key].values.astype(np.int64)
+                train_labels = labels.where(labels.split == 'train').dropna(how='all')[lkey].values.astype(np.int64)
                 y = train_labels
             except TypeError: #test this
                 y = train_labels
@@ -465,11 +511,15 @@ class Evaluator():
             return comp, labels, meta
         
         
-    def _get_FR_feats(self, trainfile, testfile, lfile, seed, nlabels, return_dataset=True, task = 'classify', label_key = 'simple_labels'):
-        trainfeats = torch.load(os.path.join(self.output_dir,trainfile)).cpu() 
-
+    def _get_FR_feats(self, trainfile, testfile, lfile, seed, nlabels, return_dataset=True, lkey = "simple_labels",):
+        if trainfile.endswith(".pth"):
+            trainfeats = torch.load(os.path.join(self.output_dir,trainfile)).cpu() 
+        else: 
+            trainfeats = np.load(os.path.join(self.output_dir,trainfile))
+        if self.config['tags']['pca'] is not None:
+            trainfeats, _, _ = fit_pca(trainfeats, n_components = self.config['tags']['pca'])
         #labels
-        train_labels, test_labels = self._get_num_classes(return_values = True, task=task, label_key=label_key)
+        train_labels, test_labels = self._get_num_classes(return_values = True, lkey = lkey)
         y = train_labels # pd.read_csv(os.path.join(self.output_dir,lfile))
 
         #scale and encode
@@ -492,16 +542,29 @@ class Evaluator():
 
         else:
             train_feats = X_scaled
-            test_feats = torch.load(os.path.join(self.output_dir,testfile)).cpu()
+            if testfile.endswith('.pth'):
+                test_feats = torch.load(os.path.join(self.output_dir,testfile)).cpu()
+            else: 
+                test_feats = np.load(os.path.join(self.output_dir,testfile))
+            if self.config['tags']['pca'] is not None:
+                test_feats, _, _ = fit_pca(test_feats, n_components = self.config['tags']['pca'])
+
             #scale and encode
             test_feats = StandardScaler().fit_transform(test_feats)
         assert len(train_feats) == len(train_labels)
 
         if nlabels: #None if all
-            np.random.seed(seed)
-            random_idx = np.random.choice(len(train_feats), size = nlabels, replace = False)
-            train_feats = train_feats[random_idx]
-            train_labels = train_labels[random_idx]
+            i = 0
+            lunique = 0
+            
+            while lunique != len(np.unique(test_labels)):
+                np.random.seed(seed+i)
+                random_idx = np.random.choice(len(train_feats), size = nlabels, replace = False)
+                train_feats = train_feats[random_idx]
+                train_labels = train_labels[random_idx]
+                i += 1
+                lunique = len(np.unique(train_labels))
+            print(f"Not all classes were represented with random seed {seed}, therefore new seed {seed+i} was used.")
             
         train_dataset = RegressionDataset(train_feats, train_labels)
         test_dataset = RegressionDataset(test_feats, test_labels)

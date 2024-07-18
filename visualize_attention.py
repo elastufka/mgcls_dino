@@ -30,15 +30,15 @@ import torchvision
 from torchvision import transforms as pth_transforms
 import numpy as np
 from PIL import Image
-#sys.path.append('/home/glados/unix-Documents/AstroSignals/feuerzeug')
-sys.path.append('/home/users/l/lastufka/dinov2')
-from dinov2.models.vision_transformer import vit_small, vit_large, vit_giant2
-from feuerzeug.transforms import FakeChannels
-#from map_utils import mapdata_from_fits
+from mgcls_data_prep import mapdata_from_fits
+#sys.path.append('/path/to/dinov2')
+#from dinov2.models.vision_transformer import vit_small, vit_large, vit_giant2
+from transforms import FakeChannels
+
 
 import utils
 import vision_transformer as vits
-import wandb
+
 
 
 def apply_mask(image, mask, color, alpha=0.5):
@@ -179,12 +179,6 @@ if __name__ == '__main__':
     elif os.path.isfile(args.image_path):
         if args.image_path.endswith(".npy"):
             imarr = np.load(args.image_path).astype(np.float32)
-            #if not args.index:
-            #    idx = np.random.randint(len(imarr))
-            #else: 
-            #    idx = args.index
-            #print(f"image index: {idx}")
-            #img = imarr[idx]
             img = Image.fromarray(imarr)
         else: #FITS file
             _, img = mapdata_from_fits(args.image_path)
@@ -192,16 +186,10 @@ if __name__ == '__main__':
         #are there NaN?
         if np.isnan(np.mean(img)):
             print("NaN found!")
-            #print(f"shape: {img.shape}")
             img = np.nan_to_num(img)
         norm_mean = np.nanmean(img)
         norm_std = np.nanstd(img)
-        #print(norm_mean, np.mean(img))
-            #print(img.shape)
-        #img = torch.from_numpy(npimg) 
-        # with open(args.image_path, 'rb') as f:
-        #     img = Image.open(f)
-        #     img = img.convert('RGB')
+
     else:
         print(f"Provided image path {args.image_path} is non valid.")
         sys.exit(1)
@@ -252,42 +240,6 @@ if __name__ == '__main__':
         fname = os.path.join(args.output_dir, f"{args.prefix}attn-head{str(j)}.png")
         plt.imsave(fname=fname, arr=attentions[j], format='png')
         print(f"{fname} saved.")
-        
-#     wandb.init(
-#         # set the wandb project where this run will be logged
-#         project="visualize_attention",
-#         group= f"{args.arch}_{args.pretrain_epochs}_{args.pretrain_data}",
-#         # track hyperparameters and run metadata
-#         config={
-#         #"learning_rate": hps['lr'],
-#         "pre-trained backbone": args.arch,
-#         "patch size": args.patch_size,
-#         "pre-training epochs": args.pretrain_epochs,
-#         "pre-training dataset": args.pretrain_data,
-#         "image" : args.image_path,
-#         }
-#     )   
-    
-#     fig, ax = plt.subplots(2,4, figsize = (10,6))
-#     imarr = np.array(img)[0,0,:,:]
-#     ax[1,2].imshow(imarr, origin='lower')
-#     ax[1,2].set_title("Img")
-#     ax[1,2].axis("off")
-    
-#     ax[1,3].imshow(np.log10(imarr), origin='lower')
-#     ax[1,3].set_title("log10 img")
-#     ax[1,3].axis("off")
-
-
-#     for i in range(nh):
-#         im = attentions[i]
-#         ax[i//4,i%4].imshow(im,origin='lower')
-#         head_title = f"attn-head {i}"
-#         ax[i//4,i%4].set_title(head_title, fontsize = 11)
-#         ax[i//4,i%4].axis('off')
-    
-#     wandb.log({"attention-maps":fig})
-#     wandb.finish()
 
     if args.threshold is not None:
         image = skimage.io.imread(os.path.join(args.output_dir, f"{args.prefix}img.png"))
