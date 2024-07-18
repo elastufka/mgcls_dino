@@ -1,8 +1,8 @@
 # mgcls_dino
 
-DINO v1 repository (https://github.com/facebookresearch/dino) modified for use with crops from MeerKAT continuum images from the MGCLS survey.
+[DINO v1 repository](https://github.com/facebookresearch/dino) modified for use with crops from MeerKAT continuum images from the MGCLS survey.
 
-for the paper [Beyond Galaxy Zoo: Self-Supervised Learning on MeerKAT Wide-Field Continuum Images]()
+for the paper [Self-Supervised Learning on MeerKAT Wide-Field Continuum Images]()
 
 ## Data Availability
 
@@ -16,7 +16,7 @@ Public data can be downloaded from the [MGCLS data release](https://archive-gw-1
 
 Minor edits in utils.py to accept single-channel images as input
 
-### Additionals
+### Additions
 
 **Data preparation**
 - mgcls_data_prep.py
@@ -71,27 +71,38 @@ srun python -m torch.distributed.launch --nproc_per_node=4 main_meerkat.py --dat
 
 Generate labels via pyBDSF_to_COCO and crop_catalog_aggs(). Otherwise modify evaluator.py to accept the names of custom labels.
 
+Extract features:
+
+```
+python eval_knn_train.py --data_path $data_path --dump_features $output_dir --arch $arch --patch_size $patch_size --num_workers 0 --in_chans $in_chans --pretrained_weights $output_dir/$checkpoint_name 
+```
+
 Modify config.yaml to point to the desired inputs, labels, and output destination.
 
 ```
 python evaluator.py --config config.yaml
 ```
 
+**Attention maps**
+```
+python visualize_attention.py --image_path prepared_image.npy --image_size 256 256 --arch $arch --output_dir $output_dir --patch_size $patch_size --pretrained_weights $output_dir/$checkpoint_name  --in_chans 1
+```
+
+
 ## Pretrained Models
 
-| Architecture    | Weight initialization | Pre-training Epochs | Checkpoint name |
-| -------- | ------- | -------- | ------- |
-| ViT-S8  | Random | 325 | mgcls_vits8_pretrain_325.pth |
-| ViT-B16 | DINOv1 | 25 | mgcls_vitb16_pretrain_025.pth |
-| ResNet50 | Random | 425 | mgcls_resnet50_pretrain_425.pth |
+Checkpoints are available for download [here](https://doi.org/10.5281/zenodo.12771941).
+
+| Architecture    | Weight initialization | Pre-training Epochs | Full Checkpoint | Teacher Checkpoint |
+| -------- | ------- | -------- | ------- | ------- |
+| ViT-S8  | Random | 325 | mgcls_vits8_pretrain_325.pth | mgcls_vits8_pretrain_325_teacher.pth |
+| ViT-B16 | DINOv1 | 25 | mgcls_vitb16_pretrain_025.pth | mgcls_vitb16_pretrain_025_teacher.pth |
+| ResNet50 | Random | 425 | mgcls_resnet50_pretrain_425.pth | mgcls_resnet50_pretrain_425_teacher.pth |
+
+Use the weights for the teacher network for feature extraction/finetuning
 
 ## Documentation
 
 see docstrings
-
-## Acknowledgements
-
-Credits to the original authors and contributors of Facebook's DINO framework.
-Acknowledgements to any other sources or individuals who contributed to your modifications.
 
 
